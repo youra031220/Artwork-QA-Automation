@@ -37,7 +37,7 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
         c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows)
         st.subheader("문단 및 곡선 제품명 정리")
-        st.caption("일반 문구는 동일 텍스트 블록 기준으로 문단 결합, 곡선 제품명은 인접한 회전 글자 조각을 연결합니다. 원본 추출 내용은 별도 보존합니다.")
+        st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
         st.dataframe(
             groups_df[["file", "page", "type", "paragraph", "line_count", "status"]],
