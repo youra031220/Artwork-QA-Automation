@@ -18,6 +18,26 @@ KOR = re.compile("[가-힣]")
 FOREIGN = re.compile(r"[A-Za-zÀ-ÿА-Яа-я]{3,}")
 
 
+# Latin-language bibliographic attributions can be embedded in Korean copy.
+# Preserve only text actually printed in the PDF; never fill from a template.
+INLINE_SOURCE = re.compile(
+    r"Euromonitor\s+International\s+Limited\s*,?\s*"
+    r"Home\s+and\s+Garden\s+\d{4}",
+    re.IGNORECASE,
+)
+
+
+def _korean_scope_end(text, hangul_position):
+    """Stop before foreign translations but keep embedded English citations."""
+    for foreign in FOREIGN.finditer(text, hangul_position + 1):
+        source = INLINE_SOURCE.match(text, foreign.start())
+        if source and KOR.search(text[source.end():source.end() + 40]):
+            continue
+        return foreign.start()
+    return len(text)
+
+
+
 def korean_segment(line):
     chars = [c for span in line["spans"] for c in span["chars"]]
     text = "".join(c["c"] for c in chars)
@@ -32,11 +52,7 @@ def korean_segment(line):
     leading = re.search(r"(?:QR|AI)\s*$", prefix)
     if leading:
         start -= len(leading.group())
-    end = len(text)
-    for other in FOREIGN.finditer(text, match.end()):
-        if KOR.search(text[match.start():other.start()]):
-            end = other.start()
-            break
+    end = _korean_scope_end(text, match.start())
     while end > start and text[end - 1] in " /|•\u00a0":
         end -= 1
     if end <= start:
@@ -91,10 +107,7 @@ def tight_ocr(page, line, chars, dpi):
     prefix = re.search(r"(?:QR|AI)\s*$", result[max(0, start - 3):start])
     if prefix:
         start -= len(prefix.group())
-    end = len(result)
-    next_language = FOREIGN.search(result, match.end())
-    if next_language:
-        end = next_language.start()
+    end = _korean_scope_end(result, match.start())
     return result[start:end].strip(" /|•")
 
 
