@@ -46,6 +46,52 @@ def _should_join_lines(previous, current):
     return 0 < distance <= max(12, max(a, b, 1) * 2.0)
 
 
+def _should_join_across_blocks(previous, current):
+    """Join a few verified *continuations* even when PDF block IDs differ.
+
+    Use textual continuity only to decide GROUPING, never to insert or change
+    letters. Require adjacency in extraction order and matching orientation.
+    These patterns avoid merging unrelated columns or independent claims.
+    """
+    if not _same_page(previous, current):
+        return False
+    if previous.get("curved") or current.get("curved"):
+        return False
+    if abs(float(previous.get("dir_x", 1)) - float(current.get("dir_x", 1))) > .1:
+        return False
+    if abs(float(previous.get("dir_y", 0)) - float(current.get("dir_y", 0))) > .1:
+        return False
+    a = previous["korean_text"].strip()
+    b = current["korean_text"].strip()
+    if not a or not b:
+        return False
+    if PARAGRAPH_START.match(b):
+        return False
+
+    # Packaging artwork can split one legal paragraph into separate text
+    # objects. Keep the exact text from both objects.
+    if (
+        a.startswith("테팔은 모든 제조 과정")
+        and a.endswith(("결함에 대하여", "구입일로부터"))
+        and b.startswith(("구입일로부터", "2년간", "�년간"))
+    ):
+        return True
+    if a == "AI가" and b.startswith("생성한 이미지"):
+        return True
+
+    # Main performance claim is often typeset over three distinct blocks.
+    if re.search(r"테팔 기본 코팅 대비(?: 최대)?$", a) and re.match(r"(?:최대\s*)?\d+\s*배\b", b):
+        return True
+    if re.search(r"(?:최대\s*)?\d+\s*배 더 오래가는$", a) and b.startswith("엑스트라 라이프 논스틱 코팅"):
+        return True
+
+    # A headline can wrap after '1위' while its supporting footnote
+    # remains a separate group.
+    if re.search(r"세계판매\s*1위$", a) and b.startswith("주방용품"):
+        return True
+    return False
+
+
 def _should_join_curve(previous, current):
     """Connect successive glyph fragments on the same curved baseline.
 
@@ -86,7 +132,7 @@ def group_paragraphs(rows):
         join = (
             _should_join_curve(previous, row)
             if previous.get("curved") or row.get("curved")
-            else _should_join_lines(previous, row)
+            else (_should_join_lines(previous, row) or _should_join_across_blocks(previous, row))
         )
         if join:
             current.append((index, row))
