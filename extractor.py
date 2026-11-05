@@ -98,6 +98,48 @@ def tight_ocr(page, line, chars, dpi):
     return result[start:end].strip(" /|•")
 
 
+
+def repair_damaged_native(native, candidate):
+    """Patch only unreadable glyphs; never overwrite readable Korean with OCR.
+
+    OCR can omit the rest of a long line. Restoring only supported numbers
+    and confirmed spacing keeps valid native wording intact.
+    """
+    repaired = native
+    repairs = []
+    for found in re.finditer(r"(\d{1,4})\s*([가-힣]{1,3})", candidate):
+        number, following = found.groups()
+        for n in range(min(3, len(following)), 0, -1):
+            anchor = following[:n]
+            pattern = r"\ufffd{1,8}(\s*)" + re.escape(anchor)
+            match = re.search(pattern, repaired)
+            if match:
+                repaired = (
+                    repaired[:match.start()]
+                    + number
+                    + match.group(1)
+                    + repaired[match.end() - len(anchor):]
+                )
+                repairs.append("숫자")
+                break
+
+    # Korean-only artwork often maps spaces to replacement glyphs.
+    # Require a matching word boundary in OCR before repairing spacing.
+    chunks = [c for c in re.split(r"\ufffd+", native) if c.strip()]
+    evidence = False
+    for left, right in zip(chunks, chunks[1:]):
+        lwords, rwords = left.strip().split(), right.strip().split()
+        if lwords and rwords:
+            lword, rword = lwords[-1], rwords[0]
+            if lword[-2:] + " " + rword[:2] in candidate:
+                evidence = True
+                break
+    if evidence:
+        repaired = re.sub(r"(?<=[가-힣])\ufffd+(?=[가-힣])", " ", repaired)
+        repairs.append("공백")
+    return repaired, repairs
+
+
 def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
     rows, summaries = [], []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -121,18 +163,11 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         candidate = tight_ocr(page, line, chars, dpi)
                         ocr_lines += 1
                     if broken:
-                        anchor = "".join(KOR.findall(native))
-                        recognized = "".join(KOR.findall(candidate))
-                        similarity = (
-                            SequenceMatcher(None, anchor, recognized).ratio()
-                            if anchor and recognized else 0.0
+                        best, repaired_parts = repair_damaged_native(native, candidate)
+                        status = (
+                            "부분 복원 · 원본 확인" if "\ufffd" in best
+                            else "OCR 복원 후보 · 검증 필요"
                         )
-                        if candidate and similarity >= .7 and "\ufffd" not in candidate:
-                            best = candidate
-                            status = "OCR 복원 후보 · 검증 필요"
-                        else:
-                            best = native
-                            status = "복원 실패 · 원본 확인"
                     else:
                         best = native
                         status = "곡선 배치 · 연결 확인" if curved else "원본 추출 정상"
