@@ -6,6 +6,7 @@ from product_identity import check_product_identity
 import io
 import zipfile
 import json
+import fitz
 
 st.set_page_config(page_title="아트웍 검수 자동화 — 국문 추출", layout="wide")
 st.title("아트웍 검수 자동화")
@@ -45,11 +46,54 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
         c.metric("FAIL 제품", int((overall["종합 판정"] == "FAIL").sum()))
         st.dataframe(overall, use_container_width=True, hide_index=True)
         st.dataframe(
-            checks_df[["file", "check", "expected_from_filename", "extracted",
-                       "status", "context", "note"]],
+            checks_df[["file", "page", "location", "check", "expected_from_filename", "extracted",
+                       "status", "context", "x0", "y0", "note"]],
             use_container_width=True, hide_index=True
         )
         st.caption("OK는 파일명 대비 제품명·규격 일치를 뜻합니다. 주변 영문·프랑스어 광고 문구의 승인 철자 검사는 아직 별도 기준이 필요합니다.")
+        with st.expander("PDF 추출 위치 미리보기 · 근거 확인"):
+            available = checks_df[checks_df["x0"].notna()]
+            if available.empty:
+                st.info("좌표가 확인된 문구가 없습니다.")
+            else:
+                file_options = available["file"].drop_duplicates().tolist()
+                selected_file = st.selectbox("PDF 파일", file_options, key="identity_file")
+                source_rows = available[available["file"] == selected_file]
+                labels = [
+                    f"{r['check']} · p.{int(r['page'])} · {r['extracted']}"
+                    for _, r in source_rows.iterrows()
+                ]
+                selected_index = st.selectbox(
+                    "확인할 위치", range(len(labels)),
+                    format_func=lambda i: labels[i], key="identity_position"
+                )
+                selected = source_rows.iloc[selected_index]
+                uploaded = next((item for item in files if item.name == selected_file), None)
+                if uploaded:
+                    with fitz.open(stream=uploaded.getvalue(), filetype="pdf") as evidence_pdf:
+                        evidence_page = evidence_pdf[int(selected["page"]) - 1]
+                        target = fitz.Rect(
+                            float(selected["x0"]), float(selected["y0"]),
+                            float(selected["x1"]), float(selected["y1"])
+                        )
+                        margin_x = max(25, target.width * 1.0)
+                        margin_y = max(18, target.height * 2.0)
+                        crop = fitz.Rect(
+                            target.x0 - margin_x, target.y0 - margin_y,
+                            target.x1 + margin_x, target.y1 + margin_y
+                        ) & evidence_page.rect
+                        if not crop.is_empty:
+                            pixmap = evidence_page.get_pixmap(
+                                clip=crop, matrix=fitz.Matrix(2, 2), alpha=False
+                            )
+                            st.image(pixmap.tobytes("png"), caption=(
+                                f"{selected['location']} · PDF {int(selected['page'])}페이지"
+                                f" · x={selected['x0']}, y={selected['y0']}"
+                            ))
+                            st.write("추출 문구:", selected["extracted"])
+                            if selected["context"]:
+                                st.write("주변 문구:", selected["context"])
+        
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
