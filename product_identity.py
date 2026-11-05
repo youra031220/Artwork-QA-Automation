@@ -116,6 +116,11 @@ def _check_product(expected_type, size_cm, observed):
 
 
 def check_product_identity(pdf_bytes, filename):
+    """Main QA: compare two independent regions IN the PDF.
+
+    Filename and PRODUIT are supplementary; neither can make front/GAMME
+    agreement pass or fail. Uncertain headline extraction is REVIEW.
+    """
     ref = filename_reference(filename)
     results = []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -126,69 +131,94 @@ def check_product_identity(pdf_bytes, filename):
             sheet_product = _find_sheet_value(lines, "PRODUIT")
             gamme = sheet_range[0][1] if sheet_range else ""
             produit = sheet_product[0][1] if sheet_product else ""
-            gamme_status = _check_range(ref["range"], gamme)
-            produit_status = _check_product(ref["product"], ref["size_cm"], produit)
 
-            # The title printed in the marketing artwork is distinct from the
-            # small-font job sheet. Check the headline itself, not just GAMME.
-            expected = normalize(ref["range"] or "")
-            title_candidates = [
-                x for x in lines
-                if x["font_size"] >= 12 and
-                not re.match(r"^(?:GAMME|PRODUIT|CLIENT|DOSSIER)\b", x["text"], re.I) and
-                x["direction"][0] > 0.8 and
-                (expected and (
-                    expected in normalize(x["text"]) or
-                    SequenceMatcher(None, expected, normalize(x["text"])).ratio() >= .78
-                ))
-            ]
-            title_candidates.sort(
-                key=lambda x: (
-                    normalize(x["text"]) != expected,
-                    -x["font_size"],
-                    x["y0"],
+            # G7 is an internal group/version prefix, not part of the
+            # range's printable brand name.
+            range_text = re.sub(r"^\s*G\s*\d+\s+", "", gamme, flags=re.I).strip()
+            expected = normalize(range_text)
+            candidates = [
+                item for item in lines
+                if expected and item["font_size"] >= 12
+                and item["direction"][0] > .8
+                and not re.match(
+                    r"^(?:GAMME|PRODUIT|CLIENT|DOSSIER|ECHELLE|ÉCHELLE)\b",
+                    item["text"], re.I
                 )
-            )
-            title = title_candidates[0] if title_candidates else None
-            title_status = "OK" if title and normalize(title["text"]) == expected else (
-                "FAIL" if title else "REVIEW"
-            )
-            # Capture neighboring lines as *context*, without pretending that
-            # filename comparison validates marketing tagline spelling.
+                and SequenceMatcher(None, expected, normalize(item["text"])).ratio() >= .72
+            ]
+            # Prefer the large, actual front-of-pack heading rather than
+            # incidental mentions in a different part of the dieline.
+            candidates.sort(key=lambda item: (
+                normalize(item["text"]) != expected,
+                -item["font_size"],
+                item["x0"],
+                item["y0"],
+            ))
+            title = candidates[0] if candidates else None
+
+            if not gamme or not title:
+                primary_status = "REVIEW"
+            elif normalize(title["text"]) == expected:
+                primary_status = "OK"
+            else:
+                primary_status = "FAIL"
+
             context = []
             if title:
                 nearby = [
-                    x for x in lines if x is not title and
-                    abs(x["x0"] - title["x0"]) <= max(35, title["font_size"] * 3) and
-                    0 < x["y0"] - title["y0"] <= max(70, title["font_size"] * 3) and
-                    x["direction"][0] > .8 and x["font_size"] >= title["font_size"] * .7
+                    item for item in lines if item is not title
+                    and abs(item["x0"] - title["x0"]) <= max(35, title["font_size"] * 3)
+                    and 0 < item["y0"] - title["y0"] <= max(70, title["font_size"] * 3)
+                    and item["direction"][0] > .8
+                    and item["font_size"] >= title["font_size"] * .7
                 ]
-                nearby.sort(key=lambda x: x["y0"])
-                context = [x["text"] for x in nearby[:2]]
+                nearby.sort(key=lambda item: item["y0"])
+                context = [item["text"] for item in nearby[:2]]
 
-            for field, actual, status, position in [
-                ("패키지 전면 영문 제품명", title["text"] if title else "", title_status, title),
-                ("작업정보 GAMME", gamme, gamme_status, sheet_range[0][0] if sheet_range else None),
-                ("작업정보 PRODUIT", produit, produit_status, sheet_product[0][0] if sheet_product else None),
-            ]:
-                expected_value = (
-                    ref["range"] if field != "작업정보 PRODUIT"
-                    else (f'{ref["product"]} {ref["size_cm"]} cm'
-                          if ref["product"] and ref["size_cm"] else "")
+            produit_status = _check_product(ref["product"], ref["size_cm"], produit)
+            comparison = [
+                ("패키지 전면 영문 제품명", title["text"] if title else "",
+                 primary_status, title, True),
+                ("작업정보 GAMME", gamme, primary_status,
+                 sheet_range[0][0] if sheet_range else None, True),
+                ("작업정보 PRODUIT (참고)", produit, produit_status,
+                 sheet_product[0][0] if sheet_product else None, False),
+            ]
+            for field, actual, status, position, is_primary in comparison:
+                filename_hint = (
+                    ref["range"] if "PRODUIT" not in field else
+                    f'{ref["product"]} {ref["size_cm"]} cm'
+                    if ref["product"] and ref["size_cm"] else ""
                 )
                 results.append({
-                    "file": filename, "page": page.number + 1, "check": field,
-                    "expected_from_filename": expected_value or "파일명에서 식별 불가",
-                    "extracted": actual or "미검출", "status": status,
-                    "context": " / ".join(context) if field == "패키지 전면 영문 제품명" else "",
-                    "note": ("주변 카피는 추출만 함; 승인 원문 미제공으로 철자 판정 불가"
-                             if field == "패키지 전면 영문 제품명" else ""),
+                    "file": filename,
+                    "page": page.number + 1,
+                    "check": field,
+                    "expected_from_filename": filename_hint or "파일명 기준 없음",
+                    "comparison_reference": (
+                        range_text if "패키지 전면" in field else
+                        title["text"] if "GAMME" in field and title else
+                        filename_hint
+                    ) or "확인 필요",
+                    "extracted": actual or "미검출",
+                    "status": status,
+                    "is_primary": is_primary,
+                    "context": " / ".join(context) if "패키지 전면" in field else "",
+                    "note": (
+                        "주변 광고 문구는 추출만 하며 승인 문구와의 일치 여부는 미판정"
+                        if "패키지 전면" in field else
+                        "제품 종류·규격은 파일명과 참고 비교, 종합 판정에는 미반영"
+                        if "PRODUIT" in field else
+                        "GAMME에서 G7 등의 내부 코드 제외 후 전면 제목과 비교"
+                    ),
                     "x0": position["x0"] if position else None,
                     "y0": position["y0"] if position else None,
                     "x1": position["x1"] if position else None,
                     "y1": position["y1"] if position else None,
-                    "location": ("패키지 전면 큰 제목" if field == "패키지 전면 영문 제품명"
-                                 else "우측 작업정보 " + field.split()[-1]),
+                    "location": (
+                        "패키지 전면 큰 제목" if "패키지 전면" in field
+                        else "우측 작업정보 " + ("PRODUIT" if "PRODUIT" in field else "GAMME")
+                    ),
                 })
     finally:
         doc.close()
