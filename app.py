@@ -32,10 +32,10 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
     if errors:
         st.error("\n".join(errors))
     if identity_checks:
-        st.subheader("제품명·규격 교차 검수")
+        st.subheader("패키지 제품명 ↔ 작업정보 GAMME 교차 검수")
         checks_df = pd.DataFrame(identity_checks)
         overall = (
-            checks_df.groupby("file")["status"].apply(
+            checks_df[checks_df["is_primary"]].groupby("file")["status"].apply(
                 lambda statuses: "FAIL" if "FAIL" in statuses.values
                 else ("OK" if all(status == "OK" for status in statuses) else "REVIEW")
             ).reset_index(name="종합 판정")
@@ -46,11 +46,11 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
         c.metric("FAIL 제품", int((overall["종합 판정"] == "FAIL").sum()))
         st.dataframe(overall, use_container_width=True, hide_index=True)
         st.dataframe(
-            checks_df[["file", "page", "location", "check", "expected_from_filename", "extracted",
+            checks_df[["file", "page", "location", "check", "comparison_reference", "extracted",
                        "status", "context", "x0", "y0", "note"]],
             use_container_width=True, hide_index=True
         )
-        st.caption("OK는 파일명 대비 제품명·규격 일치를 뜻합니다. 주변 영문·프랑스어 광고 문구의 승인 철자 검사는 아직 별도 기준이 필요합니다.")
+        st.caption("종합 판정은 PDF 내부의 전면 제품명과 GAMME 철자 일치만 사용합니다. 파일명과 PRODUIT는 참고용이며 종합 판정에 반영되지 않습니다. 주변 광고 문구는 별도의 승인 원문이 있어야 검수할 수 있습니다.")
         with st.expander("PDF 추출 위치 미리보기 · 근거 확인"):
             available = checks_df[checks_df["x0"].notna()]
             if available.empty:
