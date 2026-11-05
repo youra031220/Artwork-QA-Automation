@@ -146,9 +146,16 @@ def group_paragraphs(rows):
     for group in groups:
         is_curved = all(row.get("curved") for _, row in group)
         if is_curved:
-            # Artwork circular product names may include foreign "• T" fragments.
-            # Only join printed Hangul glyphs, in source reading order.
-            text = "".join("".join(HANGUL.findall(row["korean_text"])) for _, row in group)
+            # Preserve explicit word separators from the PDF when joining
+            # rotated glyphs; discard surrounding foreign "• T" fragments.
+            # Do not guess spaces from dictionary words or product names.
+            parts = []
+            for position, (_, row) in enumerate(group):
+                letters = "".join(HANGUL.findall(row["korean_text"]))
+                if letters:
+                    prefix = " " if position and row.get("curve_leading_space") else ""
+                    parts.append(prefix + letters)
+            text = "".join(parts)
             kind = "곡선 제품명"
             status = "곡선 결합 · 원본 확인" if len(group) > 1 else "곡선 배치 · 연결 확인"
         else:
