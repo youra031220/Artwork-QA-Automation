@@ -155,6 +155,20 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     if not segment:
                         continue
                     chars, native = segment
+                    # Keep the literal whitespace directly before the first
+                    # Korean glyph, even if it was removed from the substring
+                    # used for OCR. On circular labels a new rotated PDF span
+                    # can begin with a real word separator (e.g. " 팬 • T").
+                    original_chars = [c["c"] for span in line["spans"] for c in span["chars"]]
+                    first_korean = next(
+                        (i for i, ch in enumerate(original_chars) if KOR.search(ch)),
+                        None,
+                    )
+                    curve_leading_space = bool(
+                        first_korean is not None
+                        and first_korean > 0
+                        and original_chars[first_korean - 1].isspace()
+                    )
                     direction = line.get("dir", (1, 0))
                     curved = abs(direction[1]) > .3
                     broken = "\ufffd" in native
@@ -177,6 +191,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         "block_id": block_id,
                         "line_id": line_id,
                         "curved": bool(curved),
+                        "curve_leading_space": curve_leading_space,
                         "dir_x": round(direction[0], 3),
                         "dir_y": round(direction[1], 3),
                         "font_size": round(line["spans"][0]["size"], 2),
