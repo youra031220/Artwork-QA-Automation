@@ -8,15 +8,14 @@ import json
 
 st.set_page_config(page_title="아트웍 검수 자동화 — 국문 추출", layout="wide")
 st.title("아트웍 검수 자동화")
-st.caption("텍스트 추출 MVP · 국문 문구만 추출합니다. PDF의 깨진 문자는 글자 영역만 OCR로 재판독합니다.")
+st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
 col1, col2 = st.columns(2)
 with col1:
     dpi = st.select_slider("OCR 해상도", options=[200, 300, 350, 400], value=350)
 with col2:
     page_limit = st.number_input("파일당 최대 페이지", min_value=1, max_value=100, value=20)
-st.info("정상 국문은 PDF 원본 텍스트를 보존하고, 깨진 문자만 OCR 판독 후보로 보완합니다. OCR로 복원한 숫자·문구는 검수 전 원본 화면과 대조하세요.")
-if st.button("한국어만 추출", type="primary", disabled=not files):
+if st.button("텍스트 추출", type="primary", disabled=not files):
     rows, summaries, errors = [], [], []
     bar = st.progress(0)
     for index, file in enumerate(files):
@@ -36,7 +35,7 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
         c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows)
-        st.subheader("문단 및 곡선 제품명 정리")
+        st.subheader("추출 문구 정리")
         st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
         st.dataframe(
@@ -58,7 +57,7 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
             dest.writestr("korean_paragraphs.txt", "\n\n".join(
                 f"[{g['file']} / p.{g['page']}]\n{g['paragraph']}" for g in grouped
             ))
-        st.download_button("한국어 문단 + 원본 줄별 결과 ZIP 다운로드", output_zip.getvalue(),
+        st.download_button("텍스트 추출 결과 ZIP 다운로드", output_zip.getvalue(),
                            file_name="artwork_korean_text.zip", mime="application/zip")
     elif not errors:
         st.warning("한국어 문구가 없습니다. 현재 버전은 PDF에 한국어 문자 레이어가 있어야 작동합니다.")
