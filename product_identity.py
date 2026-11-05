@@ -185,6 +185,10 @@ def check_product_identity(pdf_bytes, filename):
                              if field == "패키지 전면 영문 제품명" else ""),
                     "x0": position["x0"] if position else None,
                     "y0": position["y0"] if position else None,
+                    "x1": position["x1"] if position else None,
+                    "y1": position["y1"] if position else None,
+                    "location": ("패키지 전면 큰 제목" if field == "패키지 전면 영문 제품명"
+                                 else "우측 작업정보 " + field.split()[-1]),
                 })
     finally:
         doc.close()
