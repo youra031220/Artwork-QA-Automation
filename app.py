@@ -3,12 +3,13 @@ import streamlit as st
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
 from product_identity import check_product_identity
+from pdf_overlay import collect_boxes, render_overlay, COLORS
 import io
 import zipfile
 import json
 import fitz
 
-st.set_page_config(page_title="아트웍 검수 자동화 — 국문 추출", layout="wide")
+st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출", layout="wide")
 st.title("아트웍 검수 자동화")
 st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
@@ -17,6 +18,11 @@ with col1:
     dpi = st.select_slider("OCR 해상도", options=[200, 300, 350, 400], value=350)
 with col2:
     page_limit = st.number_input("파일당 최대 페이지", min_value=1, max_value=100, value=20)
+signature = tuple((f.name, f.size) for f in (files or []))
+if st.session_state.get("qa_signature") != signature:
+    st.session_state.pop("qa_result", None)
+    st.session_state["qa_signature"] = signature
+
 if st.button("텍스트 추출", type="primary", disabled=not files):
     rows, summaries, errors, identity_checks = [], [], [], []
     bar = st.progress(0)
@@ -29,6 +35,16 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
         except Exception as exc:
             errors.append(f"{file.name}: {exc}")
         bar.progress((index + 1) / len(files))
+    st.session_state["qa_result"] = {
+        "rows": rows, "summaries": summaries,
+        "errors": errors, "identity_checks": identity_checks,
+    }
+
+if st.session_state.get("qa_result"):
+    data = st.session_state["qa_result"]
+    rows, summaries, errors, identity_checks = (
+        data["rows"], data["summaries"], data["errors"], data["identity_checks"]
+    )
     if errors:
         st.error("\n".join(errors))
     if identity_checks:
@@ -113,6 +129,72 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
                 df[["file", "page", "korean_text", "status", "pdf_original", "ocr_candidate"]],
                 use_container_width=True, hide_index=True
             )
+        st.subheader("PDF 전체 추출 위치 확인")
+        st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
+        view_files = sorted(set(
+            [r["file"] for r in rows] + [r["file"] for r in identity_checks]
+        ))
+        if view_files:
+            view_file = st.selectbox("파일 선택", view_files, key="overlay_file")
+            view_pages = sorted(set(
+                [int(r["page"]) for r in rows if r["file"] == view_file] +
+                [int(r["page"]) for r in identity_checks if r["file"] == view_file]
+            ))
+            view_page = st.selectbox("페이지 선택", view_pages, key="overlay_page")
+            left, right = st.columns([1, 2.2])
+            with left:
+                display_mode = st.radio("표시 방식", ["문단별", "원본 줄별"],
+                                        horizontal=True, key="overlay_mode")
+                show_all = st.checkbox("전체 박스 표시", value=True, key="overlay_all")
+                boxes = collect_boxes(
+                    rows, grouped, identity_checks, view_file, view_page,
+                    group_view=display_mode == "문단별"
+                )
+                kinds = list(COLORS)
+                selected_kinds = st.multiselect(
+                    "표시할 유형", kinds, default=kinds, key="overlay_types"
+                )
+                boxes = [box for box in boxes if box["kind"] in selected_kinds]
+                for kind, color in COLORS.items():
+                    if kind in selected_kinds:
+                        st.markdown(
+                            f'<span style="color:{color};font-weight:bold">■</span> {kind}',
+                            unsafe_allow_html=True
+                        )
+                if boxes:
+                    item_index = st.selectbox(
+                        "추출 항목 선택",
+                        range(len(boxes)),
+                        format_func=lambda i: (
+                            f"{i + 1}. [{boxes[i]['kind']}] "
+                            f"{boxes[i]['label'][:75]}"
+                        ),
+                        key="overlay_item"
+                    )
+                    picked = boxes[item_index]
+                    st.write("**추출 원문**")
+                    st.write(picked["label"])
+                    st.caption(f"출처: {picked['source']} · 상태: {picked['status']}")
+                    st.caption(f"표시 박스: {sum(len(b['rects']) for b in boxes)}개")
+                else:
+                    item_index = None
+                    st.info("선택한 조건에 해당하는 추출 문구가 없습니다.")
+            with right:
+                uploaded_pdf = next(
+                    (item for item in files if item.name == view_file), None
+                )
+                if uploaded_pdf:
+                    image = render_overlay(
+                        uploaded_pdf.getvalue(), view_page, boxes,
+                        selected=item_index, show_all=show_all
+                    )
+                    st.image(
+                        image,
+                        caption=f"{view_file} · {view_page}페이지 (박스는 실제 PDF 텍스트 좌표 기준)",
+                        use_container_width=True
+                    )
+                    st.caption("PDF 전체 페이지를 표시합니다. 선택된 항목은 노란색으로 강조됩니다.")
+
         original_zip = io.BytesIO(export_zip(rows, summaries))
         output_zip = io.BytesIO()
         with zipfile.ZipFile(original_zip) as source, zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as dest:
