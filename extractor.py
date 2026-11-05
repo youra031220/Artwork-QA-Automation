@@ -1,88 +1,151 @@
-"""Artwork PDF text extraction: native text + Korean OCR for suspect spans.
-No cloud calls. OCR is a *candidate*, never silently replaces source text.
+"""Extract Korean wording only from artwork PDFs.
+
+Native text gives an anchor and bounding box; Tesseract reads the rendered
+appearance to recover malformed digits/spaces. OCR is never treated as verified.
 """
-import io, re, json, csv, zipfile
+import csv
+import io
+import json
+import re
+import zipfile
+
 import fitz
-from PIL import Image
+from PIL import Image, ImageOps
 import pytesseract
 
-HANGUL = re.compile(r'[가-힣]')
-SUSPECT = re.compile(r'[\ufffd\u57d1\u57f7\u57fc\u57f5\u57f4\u57fa\u57f1\u57f0\u57f9\u57f2\u57f3\u57f6\u57f8\u57fb\u57fd]')
+KOREAN = re.compile(r"[가-힣]")
+BROKEN = re.compile(r"[\ufffd\u57d1-\u57ff]")
+KOREAN_PREFIX = re.compile(r"^\s*(?:KO|KR)\s*[-:]\s*", re.I)
 
-def _bbox(spans):
-    return fitz.Rect(min(s['bbox'][0] for s in spans), min(s['bbox'][1] for s in spans),
-                     max(s['bbox'][2] for s in spans), max(s['bbox'][3] for s in spans))
 
-def _ocr_crop(page, rect, dpi=300, rotations=(0,180)):
-    pad = max(3, rect.height * 0.35)
-    clip = (rect + (-pad,-pad,pad,pad)) & page.rect
-    if clip.is_empty:
-        return '', None, -1
-    pix = page.get_pixmap(clip=clip, matrix=fitz.Matrix(dpi/72,dpi/72), alpha=False)
-    im = Image.open(io.BytesIO(pix.tobytes('png'))).convert('RGB')
-    best = ('', None, -1)
-    for angle in rotations:
-        rotated = im.rotate(angle, expand=True) if angle else im
-        try:
-            data = pytesseract.image_to_data(rotated, lang='kor+eng', config='--psm 6', output_type=pytesseract.Output.DICT)
-            items = [(t.strip(), float(c)) for t,c in zip(data['text'],data['conf']) if t.strip() and float(c)>=0]
-            txt = ' '.join(t for t,c in items)
-            score = (sum(c for t,c in items)/len(items) if items else -1) + min(10, len(HANGUL.findall(txt)))
-            if score > best[2]:
-                best = (txt, angle, round(score,1))
-        except pytesseract.TesseractNotFoundError as exc:
-            raise RuntimeError('Tesseract 실행 파일을 설치하고 PATH를 설정하세요.') from exc
-        except pytesseract.TesseractError as exc:
-            raise RuntimeError('Tesseract 한국어(kor)·영어(eng) 언어팩을 설치하세요.') from exc
-    return best
+def _ocr(page, bbox, dpi=350):
+    rect = fitz.Rect(bbox)
+    # Expand around text, while avoiding large neighboring columns.
+    pad_x = max(2, min(8, rect.height * .25))
+    pad_y = max(2, min(5, rect.height * .25))
+    rect = (rect + (-pad_x, -pad_y, pad_x, pad_y)) & page.rect
+    if rect.is_empty:
+        return "", None, None
+    pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72),
+                          clip=rect, alpha=False)
+    image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    # Large and rotated text are common on package dielines.
+    candidates = []
+    for angle in (0, 180):
+        rotated = image.rotate(angle, expand=True) if angle else image
+        gray = ImageOps.autocontrast(ImageOps.grayscale(rotated))
+        for psm in (6, 7):
+            try:
+                result = pytesseract.image_to_data(
+                    gray, lang="kor+eng",
+                    config=f"--oem 3 --psm {psm}",
+                    output_type=pytesseract.Output.DICT,
+                )
+            except pytesseract.TesseractNotFoundError as e:
+                raise RuntimeError("서버에 Tesseract 프로그램이 없습니다. packages.txt 설치 여부를 확인하세요.") from e
+            except pytesseract.TesseractError as e:
+                raise RuntimeError("한국어 kor 언어팩을 포함한 Tesseract 설치 상태를 확인하세요.") from e
+            words = []
+            confidences = []
+            for token, confidence in zip(result["text"], result["conf"]):
+                token = token.strip()
+                try:
+                    confidence = float(confidence)
+                except (ValueError, TypeError):
+                    continue
+                if token and confidence >= 0:
+                    words.append(token)
+                    confidences.append(confidence)
+            text = " ".join(words).strip()
+            korean_count = len(KOREAN.findall(text))
+            # Prefer coherent Korean output over high-confidence English hallucination.
+            score = (
+                (sum(confidences) / len(confidences) if confidences else 0)
+                + min(korean_count, 20) * 1.6
+                - (25 if not korean_count else 0)
+            )
+            candidates.append((score, text, angle, psm))
+    best = max(candidates, key=lambda x: x[0])
+    return best[1], best[2], best[3]
 
-def extract_pdf(pdf_bytes, filename, dpi=300, mode='korean', max_pages=20):
-    rows=[]; summary=[]
-    doc=fitz.open(stream=pdf_bytes, filetype='pdf')
-    if doc.page_count > max_pages:
-        raise ValueError(f'페이지 제한 {max_pages}장 초과: {filename}')
+
+def _native_lines(page):
+    for block in page.get_text("dict", flags=0)["blocks"]:
+        for line in block.get("lines", []):
+            spans = [s for s in line["spans"] if s.get("text", "").strip()]
+            if not spans:
+                continue
+            native = "".join(s["text"] for s in spans).strip()
+            if not native:
+                continue
+            bbox = fitz.Rect(
+                min(s["bbox"][0] for s in spans),
+                min(s["bbox"][1] for s in spans),
+                max(s["bbox"][2] for s in spans),
+                max(s["bbox"][3] for s in spans),
+            )
+            yield native, bbox
+
+
+def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
+    """Return *Korean-containing lines only* and page summaries."""
+    rows, summaries = [], []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
-        for pi,page in enumerate(doc):
-            data=page.get_text('dict', flags=0)
-            line_count=0; ocr_count=0
-            for block in data['blocks']:
-                for line in block.get('lines',[]):
-                    spans=[s for s in line['spans'] if s.get('text','').strip()]
-                    if not spans:
-                        continue
-                    native=''.join(s['text'] for s in spans).strip()
-                    if not native:
-                        continue
-                    line_count+=1
-                    has_ko=bool(HANGUL.search(native))
-                    bad='\ufffd' in native or bool(SUSPECT.search(native))
-                    do_ocr=(mode=='all' or (mode=='korean' and (has_ko or bad)) or (mode=='suspect' and bad))
-                    result=''; angle=None; score=None
-                    rect=_bbox(spans)
-                    if do_ocr:
-                        result,angle,score=_ocr_crop(page,rect,dpi=dpi)
-                        ocr_count+=1
-                    rows.append({'file':filename,'page':pi+1,'native_text':native,
-                                 'ocr_text':result,'needs_review':bool(bad or (do_ocr and not result)),
-                                 'ocr_rotation':angle,'ocr_score_heuristic':score,
-                                 'x0':round(rect.x0,1),'y0':round(rect.y0,1),
-                                 'x1':round(rect.x1,1),'y1':round(rect.y1,1)})
-            summary.append({'file':filename,'page':pi+1,'native_lines':line_count,'ocr_lines':ocr_count})
+        if doc.page_count > max_pages:
+            raise ValueError(f"페이지 수가 설정된 최대치({max_pages})를 넘습니다.")
+        for page_i, page in enumerate(doc):
+            lines = list(_native_lines(page))
+            korean_lines = 0
+            for native, rect in lines:
+                # Keep Korean text and adjacent corrupted glyphs/digits in same line;
+                # exclude unrelated English, French, Polish, etc.
+                if not KOREAN.search(native):
+                    continue
+                korean_lines += 1
+                ocr, rotation, psm = _ocr(page, rect, dpi=dpi)
+                # A Korean string can be present in source while OCR misreads it.
+                # Expose both so reviewers don't accidentally accept hallucinated OCR.
+                cleaned_native = KOREAN_PREFIX.sub("", native)
+                cleaned_ocr = KOREAN_PREFIX.sub("", ocr)
+                needs_review = bool(BROKEN.search(native)) or not bool(KOREAN.search(ocr))
+                rows.append({
+                    "file": filename,
+                    "page": page_i + 1,
+                    "korean_ocr": cleaned_ocr if KOREAN.search(cleaned_ocr) else "",
+                    "pdf_original": cleaned_native,
+                    "needs_review": needs_review,
+                    "ocr_rotation": rotation,
+                    "ocr_psm": psm,
+                    "x0": round(rect.x0, 1),
+                    "y0": round(rect.y0, 1),
+                    "x1": round(rect.x1, 1),
+                    "y1": round(rect.y1, 1),
+                })
+            summaries.append({
+                "file": filename, "page": page_i + 1,
+                "native_lines": len(lines),
+                "korean_lines": korean_lines, "ocr_lines": korean_lines,
+            })
     finally:
         doc.close()
-    return rows,summary
+    return rows, summaries
+
 
 def export_zip(rows, summaries):
-    buf=io.BytesIO()
-    with zipfile.ZipFile(buf,'w',compression=zipfile.ZIP_DEFLATED) as z:
-        csv_buf=io.StringIO(newline='')
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        contents = io.StringIO(newline="")
         if rows:
-            writer=csv.DictWriter(csv_buf,fieldnames=list(rows[0]))
+            writer = csv.DictWriter(contents, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-        z.writestr('extracted_lines.csv', '\ufeff'+csv_buf.getvalue())
-        z.writestr('extracted_lines.json',json.dumps(rows,ensure_ascii=False,indent=2))
-        text='\n'.join(f"[{r['file']} / p{r['page']}]\n원본: {r['native_text']}\nOCR: {r['ocr_text']}\n" for r in rows)
-        z.writestr('comparison.txt',text)
-        z.writestr('summary.json',json.dumps(summaries,ensure_ascii=False,indent=2))
-    return buf.getvalue()
+        archive.writestr("korean_only.csv", "\ufeff" + contents.getvalue())
+        archive.writestr("korean_only.json", json.dumps(rows, ensure_ascii=False, indent=2))
+        comparison = "\n\n".join(
+            f"[{r['file']} / p.{r['page']}]\nOCR: {r['korean_ocr']}\nPDF: {r['pdf_original']}"
+            for r in rows
+        )
+        archive.writestr("korean_only.txt", comparison)
+        archive.writestr("summary.json", json.dumps(summaries, ensure_ascii=False, indent=2))
+    return buffer.getvalue()
