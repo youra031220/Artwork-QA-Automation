@@ -29,9 +29,13 @@ INLINE_SOURCE = re.compile(
 
 def _korean_scope_end(text, hangul_position):
     """Stop before foreign translations but keep embedded English citations."""
+    protected_until = -1
     for foreign in FOREIGN.finditer(text, hangul_position + 1):
+        if foreign.start() < protected_until:
+            continue
         source = INLINE_SOURCE.match(text, foreign.start())
         if source and KOR.search(text[source.end():source.end() + 40]):
+            protected_until = source.end()
             continue
         return foreign.start()
     return len(text)
