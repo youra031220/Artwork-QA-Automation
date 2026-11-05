@@ -55,8 +55,8 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
                 dest.writestr(item.filename, source.read(item.filename))
             dest.writestr("korean_paragraphs.csv", groups_df.to_csv(index=False).encode("utf-8-sig"))
             dest.writestr("korean_paragraphs.json", json.dumps(grouped, ensure_ascii=False, indent=2))
-            dest.writestr("korean_paragraphs.txt", "\\n\\n".join(
-                f"[{g['file']} / p.{g['page']}]\\n{g['paragraph']}" for g in grouped
+            dest.writestr("korean_paragraphs.txt", "\n\n".join(
+                f"[{g['file']} / p.{g['page']}]\n{g['paragraph']}" for g in grouped
             ))
         st.download_button("한국어 문단 + 원본 줄별 결과 ZIP 다운로드", output_zip.getvalue(),
                            file_name="artwork_korean_text.zip", mime="application/zip")
