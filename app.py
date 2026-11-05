@@ -1,6 +1,10 @@
 import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
+from layout import group_paragraphs
+import io
+import zipfile
+import json
 
 st.set_page_config(page_title="아트웍 검수 자동화 — 국문 추출", layout="wide")
 st.title("아트웍 검수 자동화")
@@ -31,9 +35,30 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
         a.metric("국문 문구 줄", len(rows))
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
         c.metric("확인 필요", int((df["status"] != "원본 텍스트 정상").sum()))
-        st.dataframe(df[["file", "page", "korean_text", "status", "pdf_original", "ocr_candidate"]],
-                     use_container_width=True, hide_index=True)
-        st.download_button("한국어 결과 ZIP 다운로드", export_zip(rows, summaries),
+        grouped = group_paragraphs(rows)
+        st.subheader("문단별로 정리한 한국어")
+        st.caption("같은 PDF 텍스트 블록에서 이어지는 줄만 합칩니다. 원본 문구를 수정하거나 새 문자를 만들지 않습니다.")
+        groups_df = pd.DataFrame(grouped)
+        st.dataframe(
+            groups_df[["file", "page", "paragraph", "line_count", "status"]],
+            use_container_width=True, hide_index=True
+        )
+        with st.expander("원본 줄별 추출 결과 보기"):
+            st.dataframe(
+                df[["file", "page", "korean_text", "status", "pdf_original", "ocr_candidate"]],
+                use_container_width=True, hide_index=True
+            )
+        original_zip = io.BytesIO(export_zip(rows, summaries))
+        output_zip = io.BytesIO()
+        with zipfile.ZipFile(original_zip) as source, zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as dest:
+            for item in source.infolist():
+                dest.writestr(item.filename, source.read(item.filename))
+            dest.writestr("korean_paragraphs.csv", groups_df.to_csv(index=False).encode("utf-8-sig"))
+            dest.writestr("korean_paragraphs.json", json.dumps(grouped, ensure_ascii=False, indent=2))
+            dest.writestr("korean_paragraphs.txt", "\\n\\n".join(
+                f"[{g['file']} / p.{g['page']}]\\n{g['paragraph']}" for g in grouped
+            ))
+        st.download_button("한국어 문단 + 원본 줄별 결과 ZIP 다운로드", output_zip.getvalue(),
                            file_name="artwork_korean_text.zip", mime="application/zip")
     elif not errors:
         st.warning("한국어 문구가 없습니다. 현재 버전은 PDF에 한국어 문자 레이어가 있어야 작동합니다.")
