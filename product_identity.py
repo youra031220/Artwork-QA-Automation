@@ -109,7 +109,7 @@ def _check_product(expected_type, size_cm, observed):
         return "FAIL"
     synonyms = {
         "Wok": ("wok",),
-        "Frypan": ("frypan", "frying pan", "fry pan"),
+        "Frypan": ("frypan", "frying pan", "fry pan", "poêle", "poele"),
         "Pancake": ("pancake", "crepe", "crêpe"),
     }
     return "OK" if any(word in text for word in synonyms[expected_type]) else "FAIL"
