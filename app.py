@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
+from product_identity import check_product_identity
 import io
 import zipfile
 import json
@@ -16,18 +17,39 @@ with col1:
 with col2:
     page_limit = st.number_input("파일당 최대 페이지", min_value=1, max_value=100, value=20)
 if st.button("텍스트 추출", type="primary", disabled=not files):
-    rows, summaries, errors = [], [], []
+    rows, summaries, errors, identity_checks = [], [], [], []
     bar = st.progress(0)
     for index, file in enumerate(files):
         try:
             extracted, info = extract_pdf(file.getvalue(), file.name, dpi=int(dpi), max_pages=int(page_limit))
             rows.extend(extracted)
             summaries.extend(info)
+            identity_checks.extend(check_product_identity(file.getvalue(), file.name))
         except Exception as exc:
             errors.append(f"{file.name}: {exc}")
         bar.progress((index + 1) / len(files))
     if errors:
         st.error("\n".join(errors))
+    if identity_checks:
+        st.subheader("제품명·규격 교차 검수")
+        checks_df = pd.DataFrame(identity_checks)
+        overall = (
+            checks_df.groupby("file")["status"].apply(
+                lambda statuses: "FAIL" if "FAIL" in statuses.values
+                else ("OK" if all(status == "OK" for status in statuses) else "REVIEW")
+            ).reset_index(name="종합 판정")
+        )
+        a, b, c = st.columns(3)
+        a.metric("OK 제품", int((overall["종합 판정"] == "OK").sum()))
+        b.metric("REVIEW 제품", int((overall["종합 판정"] == "REVIEW").sum()))
+        c.metric("FAIL 제품", int((overall["종합 판정"] == "FAIL").sum()))
+        st.dataframe(overall, use_container_width=True, hide_index=True)
+        st.dataframe(
+            checks_df[["file", "check", "expected_from_filename", "extracted",
+                       "status", "context", "note"]],
+            use_container_width=True, hide_index=True
+        )
+        st.caption("OK는 파일명 대비 제품명·규격 일치를 뜻합니다. 주변 영문·프랑스어 광고 문구의 승인 철자 검사는 아직 별도 기준이 필요합니다.")
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
@@ -52,6 +74,10 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
         with zipfile.ZipFile(original_zip) as source, zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as dest:
             for item in source.infolist():
                 dest.writestr(item.filename, source.read(item.filename))
+            if identity_checks:
+                dest.writestr("product_identity_checks.csv", checks_df.to_csv(index=False).encode("utf-8-sig"))
+                dest.writestr("product_identity_checks.json",
+                              json.dumps(identity_checks, ensure_ascii=False, indent=2))
             dest.writestr("korean_paragraphs.csv", groups_df.to_csv(index=False).encode("utf-8-sig"))
             dest.writestr("korean_paragraphs.json", json.dumps(grouped, ensure_ascii=False, indent=2))
             dest.writestr("korean_paragraphs.txt", "\n\n".join(
@@ -59,5 +85,5 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
             ))
         st.download_button("텍스트 추출 결과 ZIP 다운로드", output_zip.getvalue(),
                            file_name="artwork_korean_text.zip", mime="application/zip")
-    elif not errors:
-        st.warning("한국어 문구가 없습니다. 현재 버전은 PDF에 한국어 문자 레이어가 있어야 작동합니다.")
+    elif not errors and not identity_checks:
+        st.warning("추출 가능한 문구가 없습니다. PDF의 텍스트 레이어를 확인하세요.")
