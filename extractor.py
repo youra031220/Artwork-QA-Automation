@@ -149,8 +149,8 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
         for page_num, page in enumerate(doc, 1):
             page_rows = 0
             ocr_lines = 0
-            for block in page.get_text("rawdict", flags=0)["blocks"]:
-                for line in block.get("lines", []):
+            for block_id, block in enumerate(page.get_text("rawdict", flags=0)["blocks"]):
+                for line_id, line in enumerate(block.get("lines", [])):
                     segment = korean_segment(line)
                     if not segment:
                         continue
@@ -174,12 +174,21 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     rows.append({
                         "file": filename,
                         "page": page_num,
+                        "block_id": block_id,
+                        "line_id": line_id,
+                        "curved": bool(curved),
+                        "dir_x": round(direction[0], 3),
+                        "dir_y": round(direction[1], 3),
+                        "font_size": round(line["spans"][0]["size"], 2),
+                        "baseline_y": round(line["spans"][0]["origin"][1], 2),
                         "korean_text": best,
                         "status": status,
                         "pdf_original": native,
                         "ocr_candidate": candidate,
                         "x0": round(min(c["bbox"][0] for c in chars), 1),
                         "y0": round(min(c["bbox"][1] for c in chars), 1),
+                        "x1": round(max(c["bbox"][2] for c in chars), 1),
+                        "y1": round(max(c["bbox"][3] for c in chars), 1),
                     })
                     page_rows += 1
             summaries.append({
