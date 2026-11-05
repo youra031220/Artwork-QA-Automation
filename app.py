@@ -34,13 +34,13 @@ if st.button("한국어만 추출", type="primary", disabled=not files):
         a, b, c = st.columns(3)
         a.metric("국문 문구 줄", len(rows))
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
-        c.metric("확인 필요", int((df["status"] != "원본 텍스트 정상").sum()))
+        c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows)
-        st.subheader("문단별로 정리한 한국어")
-        st.caption("같은 PDF 텍스트 블록에서 이어지는 줄만 합칩니다. 원본 문구를 수정하거나 새 문자를 만들지 않습니다.")
+        st.subheader("문단 및 곡선 제품명 정리")
+        st.caption("일반 문구는 동일 텍스트 블록 기준으로 문단 결합, 곡선 제품명은 인접한 회전 글자 조각을 연결합니다. 원본 추출 내용은 별도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
         st.dataframe(
-            groups_df[["file", "page", "paragraph", "line_count", "status"]],
+            groups_df[["file", "page", "type", "paragraph", "line_count", "status"]],
             use_container_width=True, hide_index=True
         )
         with st.expander("원본 줄별 추출 결과 보기"):
