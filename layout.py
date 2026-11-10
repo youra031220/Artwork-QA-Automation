@@ -145,7 +145,18 @@ def group_paragraphs(rows):
     output = []
     for group in groups:
         is_curved = all(row.get("curved") for _, row in group)
-        if is_curved:
+        if is_curved and any(
+            len(row["korean_text"].strip()) >= 12
+            or (len(row["korean_text"].strip()) >= 6
+                and re.search(r"[,().%:：]", row["korean_text"]))
+            for _, row in group
+        ):
+            # Full rotated sentences (heat, usage, legal copy) are not
+            # curved product-name glyphs. Preserve spaces and punctuation.
+            text = " ".join(row["korean_text"].strip() for _, row in group)
+            kind = "세로 일반 문구"
+            status = "회전 문구 · 원본 확인"
+        elif is_curved:
             # Preserve explicit word separators from the PDF when joining
             # rotated glyphs; discard surrounding foreign "• T" fragments.
             # Do not guess spaces from dictionary words or product names.
