@@ -196,7 +196,7 @@ def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True):
         return Image.alpha_composite(original, overlay).convert("RGB")
 
 
-def render_selected_crop(pdf_bytes, page_number, item, margin=24):
+def render_selected_crop(pdf_bytes, page_number, item, margin=24, numeric_context=220):
     """Render just the selected native PDF rectangles at readable resolution.
 
     Handles split paragraphs by taking the union of their distinct glyph
@@ -223,6 +223,22 @@ def render_selected_crop(pdf_bytes, page_number, item, margin=24):
             bounds |= rect
         margin_x = max(float(margin), min(50, bounds.width * .18))
         margin_y = max(14.0, min(35.0, bounds.height * .50))
+        # A dangling numeric qualifier like '최대' usually has a digit or
+        # unit in an adjacent PDF object *outside* this tiny selection box.
+        # Expand the visual context without changing the QA text or evidence.
+        label = item.get("label", "").strip()
+        status = item.get("status", "")
+        needs_context = (
+            label == "최대"
+            or label.startswith("최대 [")
+            or ("문장 연결" in status)
+            or (("수치" in status or item.get("display_label", "").startswith("수치"))
+                and bounds.width < 95)
+        )
+        if needs_context:
+            context = max(100.0, min(float(numeric_context), 420.0))
+            margin_x = max(margin_x, context)
+            margin_y = max(margin_y, min(120.0, context * .42))
         crop = fitz.Rect(bounds.x0 - margin_x, bounds.y0 - margin_y,
                          bounds.x1 + margin_x, bounds.y1 + margin_y) & page.rect
         if crop.is_empty:
