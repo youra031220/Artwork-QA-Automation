@@ -84,15 +84,18 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
     direction = line.get("dir", (1, 0))
     boxes = [c["bbox"] for c in chars]
     x0 = min(b[0] for b in boxes) - (min(95, line["spans"][0]["size"] * 12) if numeric_context else 2)
-    x1 = max(b[2] for b in boxes) + 2
+    x1 = max(b[2] for b in boxes) + (max(12, line["spans"][0]["size"] * 2) if numeric_context else 4)
     first_span = line["spans"][0]
     baseline = first_span["origin"][1]
     size = first_span["size"]
     upside_down = direction[0] < -0.8
     if upside_down:
-        y0, y1 = baseline - size * .18, baseline + size * 1.0
+        y0, y1 = baseline - size * .38, baseline + size * 1.30
     else:
-        y0, y1 = baseline - size * 1.05, baseline + size * .22
+        # PDF glyphs can extend beyond font metrics; tight vertical clipping
+        # truncates the second half of multiword Korean OCR candidates.
+        factor_top, factor_bottom = (1.30, .40) if numeric_context else (1.15, .30)
+        y0, y1 = baseline - size * factor_top, baseline + size * factor_bottom
     rect = fitz.Rect(x0, y0, x1, y1) & page.rect
     if rect.is_empty:
         return ""
