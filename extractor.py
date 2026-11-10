@@ -131,44 +131,107 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
 
 
 def repair_damaged_native(native, candidate):
-    """Patch only unreadable glyphs; never overwrite readable Korean with OCR.
+    """Never splice OCR numbers into native text.
 
-    OCR can omit the rest of a long line. Restoring only supported numbers
-    and confirmed spacing keeps valid native wording intact.
+    The previous regex copied only the last portion of a fraction into an
+    unrelated replacement glyph (18/10 -> ...10...), producing false claims.
+    Preserve the source and present OCR only as review evidence.
     """
-    repaired = native
-    repairs = []
-    for found in re.finditer(r"(\d{1,4})\s*([가-힣]{1,3})", candidate):
-        number, following = found.groups()
-        for n in range(min(3, len(following)), 0, -1):
-            anchor = following[:n]
-            pattern = r"\ufffd{1,8}(\s*)" + re.escape(anchor)
-            match = re.search(pattern, repaired)
-            if match:
-                repaired = (
-                    repaired[:match.start()]
-                    + number
-                    + match.group(1)
-                    + repaired[match.end() - len(anchor):]
-                )
-                repairs.append("숫자")
-                break
+    if "\ufffd" not in native or not candidate:
+        return native, []
+    # Even readable matching numbers do not authorize replacing a damaged
+    # interval without a verified character-to-rectangle alignment.
+    return native, ["OCR 후보 분리 보존"]
 
-    # Korean-only artwork often maps spaces to replacement glyphs.
-    # Require a matching word boundary in OCR before repairing spacing.
-    chunks = [c for c in re.split(r"\ufffd+", native) if c.strip()]
-    evidence = False
-    for left, right in zip(chunks, chunks[1:]):
-        lwords, rwords = left.strip().split(), right.strip().split()
-        if lwords and rwords:
-            lword, rword = lwords[-1], rwords[0]
-            if lword[-2:] + " " + rword[:2] in candidate:
-                evidence = True
-                break
-    if evidence:
-        repaired = re.sub(r"(?<=[가-힣])\ufffd+(?=[가-힣])", " ", repaired)
-        repairs.append("공백")
-    return repaired, repairs
+
+# A numeric qualifier with Korean units is not a damaged number.
+NUMERIC_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"\d{1,4}\s*/\s*\d{1,4}"
+    r"|\d{1,4}(?:[.,]\d+)?\s*%"
+    r"|\d{1,4}(?:[.,]\d+)?\s*(?:배|년|위|개|명|cm|mm|L|PCS|YEARS|X)\b"
+    r"|(?:No\.?\s*)\d+"
+    r"|\d{4}"
+    r")(?!\d)", re.I
+)
+
+
+def normalize_numeric_token(token):
+    return re.sub(r"\s+", "", token).casefold().replace(",", ".")
+
+
+def numeric_tokens(text):
+    return set(normalize_numeric_token(m.group())
+               for m in NUMERIC_TOKEN_PATTERN.finditer(text))
+
+
+def numeric_evidence_disagrees(native, ocr):
+    """Report conflicts without treating a missing/unreliable OCR as proof."""
+    if not ocr:
+        return False
+    native_tokens = numeric_tokens(native)
+    ocr_tokens = numeric_tokens(ocr)
+    if not ocr_tokens:
+        # The OCR might have lost the number entirely; leave native unchanged.
+        return False
+    # Never treat an OCR-only token as authoritatively correct.
+    return native_tokens != ocr_tokens
+
+
+def source_citation_prefix(text, preceding=""):
+    """Extract *observed* contiguous Euromonitor attribution fragments."""
+    prefix = text.split("에디션", 1)[0]
+    local = re.search(
+        r"Euromonitor\s+International\s+Limited\s*,?\s*"
+        r"Home\s+and\s+Garden\s+\d{4}\s*$",
+        prefix, re.I
+    )
+    if local:
+        return local.group().strip(), []
+    partial = re.search(
+        r"\bLimited\s*,?\s*Home\s+and\s+Garden\s+\d{4}\s*$",
+        prefix, re.I
+    )
+    if partial:
+        earlier = re.search(r"Euromonitor\s+International\s*$", preceding, re.I)
+        if earlier:
+            return earlier.group().strip() + " " + partial.group().strip(), []
+        return partial.group().strip(), ["영문 출처 앞부분 분리 확인"]
+    return "", []
+
+
+def all_raw_lines(page):
+    """Lossless page-level evidence layer, independent of Korean filtering."""
+    evidence = []
+    for block_id, block in enumerate(page.get_text("rawdict", flags=0)["blocks"]):
+        for line_id, line in enumerate(block.get("lines", [])):
+            spans = line.get("spans", [])
+            if not spans:
+                continue
+            chars = [c for span in spans for c in span.get("chars", [])]
+            if not chars:
+                continue
+            evidence.append({
+                "id": f"p{page.number+1}:b{block_id}:l{line_id}",
+                "page": page.number + 1, "block_id": block_id,
+                "line_id": line_id,
+                "text": "".join(c["c"] for c in chars),
+                "bbox": [round(float(v), 2) for v in line["bbox"]],
+                "direction": [round(float(v), 4) for v in line.get("dir", (1, 0))],
+                "font_size": round(float(spans[0]["size"]), 2),
+                "spans": [{
+                    "span_id": i,
+                    "text": "".join(c["c"] for c in span.get("chars", [])),
+                    "chars": [{
+                        "text": c["c"],
+                        "bbox": [round(float(v), 2) for v in c["bbox"]]
+                    } for c in span.get("chars", [])]
+                } for i, span in enumerate(spans)],
+                "source": "native_pdf"
+            })
+    return evidence
+
+
 
 
 NUMERIC_CONTEXT = re.compile(
@@ -176,13 +239,6 @@ NUMERIC_CONTEXT = re.compile(
     r"Euromonitor|Home and Garden|코팅.{0,18}배|보증.{0,14}년)",
     re.I,
 )
-
-
-def numeric_tokens(text):
-    return set(re.findall(
-        r"(?<!\d)(?:\d{1,4}\s*/\s*\d{1,4}|\d{1,4}(?:[,.]\d+)?\s*%|\d{4})(?!\d)",
-        text,
-    ))
 
 
 def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
