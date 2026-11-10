@@ -3,7 +3,7 @@ import streamlit as st
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
 from product_identity import check_product_identity
-from pdf_overlay import collect_boxes, render_overlay, COLORS
+from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
 from product_parser import parse_product_pdf
 from embedded_reference import load_master
 import io
@@ -300,6 +300,20 @@ if st.session_state.get("qa_result"):
                     (item for item in files if item.name == view_file), None
                 )
                 if uploaded_pdf:
+                    if item_index is not None:
+                        st.markdown("**선택한 문구 확대 보기**")
+                        zoomed = render_selected_crop(
+                            uploaded_pdf.getvalue(), view_page, boxes[item_index]
+                        )
+                        if zoomed is not None:
+                            st.image(
+                                zoomed,
+                                caption="선택 문구의 실제 PDF 영역 · 노란 테두리는 근거 위치",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.info("선택한 문구의 좌표가 없어 확대 미리보기를 표시할 수 없습니다.")
+                    st.markdown("**전체 PDF 위치 확인**")
                     image = render_overlay(
                         uploaded_pdf.getvalue(), view_page, boxes,
                         selected=item_index, show_all=show_all
