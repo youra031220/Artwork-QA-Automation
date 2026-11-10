@@ -3,11 +3,13 @@ import io
 import re
 import fitz
 from PIL import Image, ImageDraw
+from extractor import numeric_tokens
 
 COLORS = {
     "한국어": "#2788DA",
     "OCR 확인": "#1B9E77",
     "수치 확인": "#D94A4A",
+    "수치 포함": "#487C9C",
     "문장 연결": "#9B6BCC",
     "곡선": "#F39C12",
     "전면 제품명": "#8A49C7",
@@ -65,6 +67,21 @@ def _kind(status, curved=False, product_curve=False):
         return "OCR 확인"
     return "곡선" if product_curve else "한국어"
 
+
+def numeric_display_label(text, status, numeric_review=False, numeric_peers=None):
+    """A normal numeric phrase is reviewable, not necessarily erroneous."""
+    if numeric_review or "수치 대조 필요" in status:
+        return "수치 대조 필요"
+    if "문장 연결" in status:
+        return "수치 대조 필요 · 문장 연결" if numeric_peers else "문장 연결 확인"
+    if (re.search(r"\ufffd{1,6}\s*(?:%|/|배|년|위)", text)
+            or re.search(r"(?<!\w)\d{1,4}\s*&\s*(?=[가-힣]|$)", text)):
+        return "수치 대조 필요"
+    if numeric_tokens(text) or (numeric_peers or []):
+        return "수치 포함 · 확인 권장"
+    return ""
+
+
 def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True, raw_summaries=None):
     """Use original line rectangles, not a guessed paragraph bounding box."""
     output = []
@@ -81,20 +98,37 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
             indices = [i for i in group["line_indices"] if i in page_rows]
             if not indices:
                 continue
-            color = _kind(group["status"], product_curve=group["type"] == "곡선 제품명")
+            numeric_label = numeric_display_label(
+                group["paragraph"], group["status"],
+                group.get("numeric_review", False),
+                group.get("numeric_peer_evidence", []),
+            )
+            color = ("수치 확인" if numeric_label.startswith("수치 대조")
+                     else "수치 포함" if numeric_label.startswith("수치 포함")
+                     else _kind(group["status"],
+                                product_curve=group["type"] == "곡선 제품명"))
             output.append({
                 "label": group["paragraph"], "kind": color,
                 "source": "추출 문단", "status": group["status"],
+                "display_label": numeric_label or color,
                 "rects": [rect for i in indices for rect in (
                     [rect_from_row(page_rows[i])] + _citation_rects(page_rows[i], evidence)
                 )],
             })
     else:
         for row_index, row in page_rows.items():
-            color = _kind(row["status"], product_curve=row.get("curved", False))
+            numeric_label = numeric_display_label(
+                row["korean_text"], row["status"],
+                row.get("numeric_review", False),
+                row.get("numeric_peer_evidence", []),
+            )
+            color = ("수치 확인" if numeric_label.startswith("수치 대조")
+                     else "수치 포함" if numeric_label.startswith("수치 포함")
+                     else _kind(row["status"], product_curve=row.get("curved", False)))
             output.append({
                 "label": row["korean_text"], "kind": color,
                 "source": "원본 줄", "status": row["status"],
+                "display_label": numeric_label or color,
                 "line_index": row_index,
                 "rects": [rect_from_row(row)] + _citation_rects(row, evidence),
             })
