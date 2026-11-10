@@ -87,6 +87,58 @@ if st.session_state.get("qa_result"):
     product_metadata = data.get("product_metadata", [])
     if errors:
         st.error("\n".join(errors))
+    if product_metadata:
+        st.subheader("P0 · PDF 제품정보 구조화 (검수 승인 아님)")
+        meta_fields = [
+            "file", "range_name", "cmmf", "dossier", "product_type_raw",
+            "product_type_standard", "size_cm", "capacity_l", "has_lid",
+            "lid_material", "manufacturing_country", "induction_compatible",
+            "material", "production_agency", "parse_status"
+        ]
+        meta_table = pd.DataFrame([
+            {field: item.get(field) for field in meta_fields}
+            for item in product_metadata
+        ])
+        st.dataframe(meta_table, use_container_width=True, hide_index=True)
+        pick_file = st.selectbox("근거 확인할 파일", [m["file"] for m in product_metadata],
+                                 key="p0_meta_file")
+        detail = next(m for m in product_metadata if m["file"] == pick_file)
+        with st.expander("제품정보 원문과 PDF 좌표"):
+            evidence_rows = []
+            for field, items in detail.get("evidence", {}).items():
+                for item in items:
+                    evidence_rows.append({"field": field, **item})
+            if evidence_rows:
+                st.dataframe(pd.DataFrame(evidence_rows), hide_index=True,
+                             use_container_width=True)
+                selected_evidence = st.selectbox(
+                    "위치 미리보기",
+                    range(len(evidence_rows)),
+                    format_func=lambda i: evidence_rows[i]["field"] + ": "
+                    + evidence_rows[i].get("original_text", "")[:55],
+                    key="p0_meta_evidence"
+                )
+                entry = evidence_rows[selected_evidence]
+                original_file = next((f for f in files if f.name == pick_file), None)
+                if original_file and entry.get("bbox"):
+                    with fitz.open(stream=original_file.getvalue(), filetype="pdf") as doc:
+                        page = doc[int(entry["page"]) - 1]
+                        box = fitz.Rect(*entry["bbox"])
+                        crop = fitz.Rect(box.x0 - 25, box.y0 - 20,
+                                         box.x1 + 25, box.y1 + 20) & page.rect
+                        if not crop.is_empty:
+                            st.image(page.get_pixmap(
+                                clip=crop, matrix=fitz.Matrix(2, 2),
+                                alpha=False
+                            ).tobytes("png"), caption=entry["original_text"])
+            st.write("확인 필요:", detail["uncertain_fields"])
+        st.download_button("제품정보 CSV 다운로드",
+                           meta_table.to_csv(index=False).encode("utf-8-sig"),
+                           "p0_product_metadata.csv", mime="text/csv")
+        st.download_button("제품정보 JSON 다운로드",
+                           json.dumps(product_metadata, ensure_ascii=False, indent=2),
+                           "p0_product_metadata.json", mime="application/json")
+
     if identity_checks:
         st.subheader("패키지 제품명 ↔ 작업정보 GAMME 교차 검수")
         checks_df = pd.DataFrame(identity_checks)
