@@ -409,5 +409,12 @@ def export_zip(rows, summaries):
                 for r in rows
             ),
         )
-        archive.writestr("summary.json", json.dumps(summaries, ensure_ascii=False, indent=2))
+        summary_metadata = [{k: v for k, v in item.items() if k != "raw_evidence"}
+                            for item in summaries]
+        archive.writestr("summary.json", json.dumps(summary_metadata, ensure_ascii=False, indent=2))
+        archive.writestr("raw_pdf_evidence.json", json.dumps([
+            {"file": item["file"], "page": item["page"],
+             "lines": item.get("raw_evidence", [])}
+            for item in summaries
+        ], ensure_ascii=False, indent=2))
     return output.getvalue()
