@@ -38,6 +38,8 @@ def _should_join_lines(previous, current):
     b = float(current.get("font_size", 0))
     if a and b and abs(a - b) / max(a, b) > .18:
         return False
+    if _maximum_continuation(previous, current):
+        return True
     # A numeric claim can wrap at the right edge of the same text block.
     # Allow only a preceding "최대" and a following damaged/visible percentage;
     # do not generally join distant columns.
@@ -52,6 +54,36 @@ def _should_join_lines(previous, current):
     baseline_b = float(current.get("baseline_y", current["y0"]))
     distance = baseline_b - baseline_a
     return 0 < distance <= max(12, max(a, b, 1) * 2.0)
+
+
+def _maximum_continuation(previous, current):
+    """Connect dangling maximum only to a spatially adjacent continuation."""
+    if not _same_page(previous, current) or previous.get("curved") or current.get("curved"):
+        return False
+    if previous["korean_text"].strip() != "최대":
+        return False
+    phrase = current["korean_text"].strip()
+    if not re.match(r"^(?:(?:\ufffd{1,5}|\d{1,3})\s*%|수납\b|공간\s*절약\b)", phrase):
+        return False
+    if PARAGRAPH_START.match(phrase):
+        return False
+    if abs(float(previous.get("dir_x", 1))-float(current.get("dir_x", 1))) > .1:
+        return False
+    if abs(float(previous.get("dir_y", 0))-float(current.get("dir_y", 0))) > .1:
+        return False
+    size_a = float(previous.get("font_size", 0))
+    size_b = float(current.get("font_size", 0))
+    if not min(size_a, size_b) or max(size_a, size_b)/min(size_a, size_b) > 1.35:
+        return False
+    x0, y0, x1, y1 = [float(previous[k]) for k in ("x0","y0","x1","y1")]
+    u0, v0, u1, v1 = [float(current[k]) for k in ("x0","y0","x1","y1")]
+    dx = max(0, u0-x1, x0-u1)
+    dy = max(0, v0-y1, y0-v1)
+    font = max(size_a, size_b)
+    same_line = abs((y0+y1)/2 - (v0+v1)/2) <= font*.6
+    next_line = 0 <= v0-y0 <= font*2.1
+    return bool((same_line and dx <= font*4) or
+                (next_line and dy <= font*1.2 and dx <= font*2.5))
 
 
 def _should_join_across_blocks(previous, current):
@@ -75,6 +107,8 @@ def _should_join_across_blocks(previous, current):
         return False
     if PARAGRAPH_START.match(b):
         return False
+    if _maximum_continuation(previous, current):
+        return True
 
     # Packaging artwork can split one legal paragraph into separate text
     # objects. Keep the exact text from both objects.
@@ -185,6 +219,13 @@ def group_paragraphs(rows):
                 if any("확인" in row["status"] or "후보" in row["status"] for _, row in group)
                 else "원본 추출 정상"
             )
+        # A lone "최대" is not a complete numeric QA claim.
+        standalone_maximum = (len(group) == 1 and
+                              group[0][1]["korean_text"].strip() == "최대")
+        if standalone_maximum:
+            text = "최대 [뒤따르는 수치·문구 연결 확인 필요]"
+            kind = "문장 연결 확인"
+            status = "문장 연결 확인 필요 · 숫자 객체 연결 미확정"
         # Keep the most severe original warning; never silently downgrade a
         # numerical ambiguity to a generic OCR flag in paragraph or ZIP views.
         warnings = list(dict.fromkeys(
@@ -192,7 +233,10 @@ def group_paragraphs(rows):
             for _, row in group
             for warning in (row.get("warnings") or [])
         ))
-        if any(row.get("numeric_review") for _, row in group):
+        if standalone_maximum:
+            warnings.append("'최대'에 연결되는 수치와 후속 문구를 원본 PDF에서 확인하세요")
+            status = "문장 연결 확인 필요 · 숫자 객체 연결 미확정"
+        elif any(row.get("numeric_review") for _, row in group):
             status = "수치 대조 필요 · 원본 확인"
             if not any("수치" in warning for warning in warnings):
                 warnings.insert(0, status)
@@ -228,6 +272,7 @@ def group_paragraphs(rows):
             "raw_evidence_ids": evidence_ids,
             "numeric_tokens": numeric,
             "ocr_candidates": candidates,
+            "numeric_peer_evidence": [e for _, row in group for e in row.get("numeric_peer_evidence", [])],
             "source_coordinates": positions,
         })
     return output
