@@ -55,33 +55,70 @@ def _evidence(line, source="pdf"):
             "confidence": "native_text"}
 
 
-def _field(lines, labels, page_width, page_height):
-    # Work-ticket labels live in the top area, not body copy where e.g.
-    # 'gamme' could occur as a French word in marketing footnotes.
-    candidates = []
-    for line in lines:
-        if line["y0"] > page_height * .22:
+def _field(lines, labels, page_width, page_height, field=""):
+    """Find a job-ticket label and its value using geometry AND semantic checks.
+
+    Agency sheets may place the value below the label, not just on the right.
+    Never take DOSSIER, ECHELLE or another label as the product type.
+    """
+    label_names = tuple(name for items in LABELS.values() for name in items)
+    header_pattern = re.compile(
+        r"^\s*(?:" + "|".join(re.escape(name) for name in
+        sorted(label_names, key=len, reverse=True)) + r")\b", re.I)
+
+    def quality(value):
+        value = value.strip()
+        if not value or header_pattern.match(value):
+            return -1000
+        if field == "product_type_raw":
+            return 30 if _normalize_type(value) != "UNKNOWN" else -100
+        if field == "range_name":
+            if re.match(r"^\d+\s*:\s*\d+$", value) or re.search(r"\bCST[_-]\d+", value, re.I):
+                return -100
+            return 15 if re.search(r"[A-Za-z]{3,}", value) else -100
+        if field == "scale":
+            return 20 if re.search(r"\b\d+\s*:\s*\d+\b", value) else -30
+        if field == "dossier":
+            return 20 if re.search(r"\b(?:CST|[A-Z]{2,}[-_]\d+)", value, re.I) else 0
+        return 0
+
+    choices = []
+    for label_line in lines:
+        if label_line["y0"] > page_height * .45:
             continue
         for label in labels:
-            match = re.match(r"^\s*" + re.escape(label) + r"\s*[:：-]?\s*(.*)$",
-                             line["text"], re.I)
+            match = re.match(
+                r"^\s*" + re.escape(label) + r"\b\s*[:：-]?\s*(.*)$",
+                label_line["text"], re.I
+            )
             if not match:
                 continue
             tail = match.group(1).strip()
-            if tail:
-                candidates.append((line, tail, line))
-            else:
-                peers = [other for other in lines
-                         if other is not line
-                         and abs(other["y0"] - line["y0"]) <= max(line["font_size"] * 1.5, 9)
-                         and 0 <= other["x0"] - line["x1"] <= page_width * .24]
-                if peers:
-                    other = sorted(peers, key=lambda p: p["x0"] - line["x1"])[0]
-                    candidates.append((line, other["text"], other))
+            if tail and quality(tail) >= 0:
+                choices.append((quality(tail) + 50, tail, label_line))
+            # Values appear either to the right or under the label in
+            # individual PDF text objects. Score position + expected content.
+            for other in lines:
+                if other is label_line or other["page"] != label_line["page"]:
+                    continue
+                dy = other["y0"] - label_line["y0"]
+                dx = other["x0"] - label_line["x0"]
+                size = max(label_line["font_size"], other["font_size"], 6)
+                same_row = abs(dy) <= size * 1.1 and other["x0"] >= label_line["x1"] - 2
+                below = 0 < dy <= size * 3.8 and abs(dx) <= page_width * .20
+                if not (same_row or below):
+                    continue
+                distance = (abs(dy) + abs(dx) * .10) if below else (
+                    abs(dy) + max(0, other["x0"] - label_line["x1"]) * .10)
+                score = quality(other["text"])
+                if score < 0:
+                    continue
+                choices.append((score + (12 if same_row else 4) - distance / size,
+                                other["text"].strip(), other))
             break
-    if not candidates:
+    if not choices:
         return None, None
-    label_line, value, value_line = min(candidates, key=lambda x: x[0]["y0"])
+    _, value, value_line = max(choices, key=lambda item: item[0])
     return value, _evidence(value_line)
 
 
@@ -118,7 +155,7 @@ def parse_product_pdf(pdf_bytes, filename):
             if page.number != 0:
                 continue
             for field, labels in LABELS.items():
-                value, evidence = _field(page_lines, labels, page.rect.width, page.rect.height)
+                value, evidence = _field(page_lines, labels, page.rect.width, page.rect.height, field)
                 if value:
                     result[field] = value
                     result["evidence"][field] = [evidence]
@@ -132,8 +169,10 @@ def parse_product_pdf(pdf_bytes, filename):
             if cm:
                 result["size_cm"] = int(cm.group(1))
                 result["evidence"]["size_cm"] = result["evidence"]["product_type_raw"]
-            result["has_lid"] = bool(re.search(r"\+\s*CV\b|\bWITH\s+LID\b|\bAVEC\s+COUVERCLE\b", raw, re.I))
+            result["has_lid"] = (True if re.search(r"\+\s*CV\b|\bWITH\s+LID\b|\bAVEC\s+COUVERCLE\b", raw, re.I) else None)
             result["evidence"]["has_lid"] = result["evidence"]["product_type_raw"]
+            if result["has_lid"] is None:
+                result["uncertain_fields"].append("has_lid: not explicitly established")
         if result["product_type_standard"] == "UNKNOWN":
             result["uncertain_fields"].append("product_type_standard")
 
