@@ -79,6 +79,28 @@ class SourceOverlayTests(unittest.TestCase):
         self.assertGreater(crop.height, 60)
         self.assertLess(crop.width, 900)
 
+    def test_isolated_maximum_crop_includes_neighboring_number(self):
+        """The 40% above 'maximum' must remain in the cropped PDF view."""
+        doc = fitz.open()
+        page = doc.new_page(width=500, height=500)
+        page.insert_text((135, 155), "40%", fontsize=26)
+        page.insert_text((120, 190), "MAX", fontsize=11)
+        page.insert_text((110, 225), "SPACE SAVING", fontsize=18)
+        region = list(page.search_for("MAX")[0])
+        original = doc.tobytes()
+        doc.close()
+        target = {"label": "최대", "status": "문장 연결 확인 필요",
+                  "rects": [region]}
+        cropped = render_selected_crop(original, 1, target)
+        normal = render_selected_crop(original, 1, {"label": "MAX",
+                                                      "status": "원본 추출 정상",
+                                                      "rects": [region]})
+        self.assertIsNotNone(cropped)
+        self.assertGreater(cropped.width, normal.width * 2.0)
+        self.assertGreater(cropped.height, normal.height * 2.0)
+        self.assertLessEqual(cropped.width, 1800)
+        self.assertLessEqual(cropped.height, 1100)
+
     def test_selected_crop_empty_rectangles_return_none(self):
         doc = fitz.open()
         doc.new_page(width=300, height=300)
