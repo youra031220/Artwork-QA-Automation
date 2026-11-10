@@ -4,10 +4,13 @@ from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, COLORS
+from product_parser import parse_product_pdf
+from excel_loader import parse_reference_excel
 import io
 import zipfile
 import json
 import fitz
+import hashlib
 
 st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출", layout="wide")
 st.title("아트웍 검수 자동화")
@@ -18,13 +21,13 @@ with col1:
     dpi = st.select_slider("OCR 해상도", options=[200, 300, 350, 400], value=350)
 with col2:
     page_limit = st.number_input("파일당 최대 페이지", min_value=1, max_value=100, value=20)
-signature = tuple((f.name, f.size) for f in (files or []))
+signature = tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (files or []))
 if st.session_state.get("qa_signature") != signature:
     st.session_state.pop("qa_result", None)
     st.session_state["qa_signature"] = signature
 
 if st.button("텍스트 추출", type="primary", disabled=not files):
-    rows, summaries, errors, identity_checks = [], [], [], []
+    rows, summaries, errors, identity_checks, product_metadata = [], [], [], [], []
     bar = st.progress(0)
     for index, file in enumerate(files):
         try:
@@ -32,12 +35,13 @@ if st.button("텍스트 추출", type="primary", disabled=not files):
             rows.extend(extracted)
             summaries.extend(info)
             identity_checks.extend(check_product_identity(file.getvalue(), file.name))
+            product_metadata.append(parse_product_pdf(file.getvalue(), file.name))
         except Exception as exc:
             errors.append(f"{file.name}: {exc}")
         bar.progress((index + 1) / len(files))
     st.session_state["qa_result"] = {
         "rows": rows, "summaries": summaries,
-        "errors": errors, "identity_checks": identity_checks,
+        "errors": errors, "identity_checks": identity_checks, "product_metadata": product_metadata,
     }
 
 if st.session_state.get("qa_result"):
@@ -45,6 +49,7 @@ if st.session_state.get("qa_result"):
     rows, summaries, errors, identity_checks = (
         data["rows"], data["summaries"], data["errors"], data["identity_checks"]
     )
+    product_metadata = data.get("product_metadata", [])
     if errors:
         st.error("\n".join(errors))
     if identity_checks:
