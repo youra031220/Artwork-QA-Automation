@@ -263,7 +263,7 @@ if st.session_state.get("qa_result"):
                         "추출 항목 선택",
                         range(len(boxes)),
                         format_func=lambda i: (
-                            f"{i + 1}. [{'수치 대조 필요' if '수치' in boxes[i]['status'] else boxes[i]['kind']}] "
+                            f"{i + 1}. [{'문장 연결 확인 필요' if '문장 연결' in boxes[i]['status'] else ('수치 대조 필요' if '수치' in boxes[i]['status'] else boxes[i]['kind'])}] "
                             f"{boxes[i]['label'][:75]}"
                         ),
                         key="overlay_item"
@@ -285,6 +285,11 @@ if st.session_state.get("qa_result"):
                             st.write("검토 사유:", related["warnings"])
                             st.info("읽기용 OCR 후보입니다. 승인된 원문이 아니므로 PDF와 대조하세요.")
                             st.write("OCR 후보:", related.get("ocr_candidates", []))
+                        if related and related.get("numeric_peer_evidence"):
+                            st.write("인접 숫자 객체 후보 (문장 연결 미확정):",
+                                     related["numeric_peer_evidence"])
+                        if related and related.get("type") == "문장 연결 확인":
+                            st.warning("이 항목은 단어만 추출되어 숫자와 후속 문구를 자동 연결하지 못했습니다. 아래 확대 PDF에서 함께 확인하세요.")
                     if picked["source"] == "원본 줄" and picked.get("line_index") is not None:
                         original_line = rows[picked["line_index"]]
                         if original_line.get("ocr_candidate"):
