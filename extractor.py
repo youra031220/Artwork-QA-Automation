@@ -171,6 +171,20 @@ def repair_damaged_native(native, candidate):
     return repaired, repairs
 
 
+NUMERIC_CONTEXT = re.compile(
+    r"(?:최대.{0,18}(?:수납|공간|절약)|스테인리스|매출.{0,22}기준|"
+    r"Euromonitor|Home and Garden|코팅.{0,18}배|보증.{0,14}년)",
+    re.I,
+)
+
+
+def numeric_tokens(text):
+    return set(re.findall(
+        r"(?<!\d)(?:\d{1,4}\s*/\s*\d{1,4}|\d{1,4}(?:[,.]\d+)?\s*%|\d{4})(?!\d)",
+        text,
+    ))
+
+
 def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
     rows, summaries = [], []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -204,8 +218,12 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     curved = abs(direction[1]) > .3
                     broken = "\ufffd" in native
                     candidate = ""
-                    if (broken or mode == "all") and not curved:
-                        candidate = tight_ocr(page, line, chars, dpi)
+                    numeric_sensitive = bool(NUMERIC_CONTEXT.search(native))
+                    if (broken or mode == "all" or numeric_sensitive) and not curved:
+                        candidate = tight_ocr(
+                            page, line, chars, dpi,
+                            numeric_context=numeric_sensitive,
+                        )
                         ocr_lines += 1
                     if broken:
                         best, repaired_parts = repair_damaged_native(native, candidate)
@@ -216,6 +234,16 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     else:
                         best = native
                         status = "곡선 배치 · 연결 확인" if curved else "원본 추출 정상"
+                    source_numbers = numeric_tokens(native)
+                    ocr_numbers = numeric_tokens(candidate)
+                    numeric_discrepancy = bool(
+                        numeric_sensitive and (
+                            (ocr_numbers and ocr_numbers != source_numbers)
+                            or (not source_numbers and candidate)
+                        )
+                    )
+                    if numeric_discrepancy:
+                        status = "수치 대조 필요 · 원본 확인"
                     rows.append({
                         "file": filename,
                         "page": page_num,
@@ -231,6 +259,9 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         "status": status,
                         "pdf_original": native,
                         "ocr_candidate": candidate,
+                        "numeric_review": numeric_discrepancy,
+                        "native_numeric_tokens": sorted(source_numbers),
+                        "ocr_numeric_tokens": sorted(ocr_numbers),
                         "x0": round(min(c["bbox"][0] for c in chars), 1),
                         "y0": round(min(c["bbox"][1] for c in chars), 1),
                         "x1": round(max(c["bbox"][2] for c in chars), 1),
