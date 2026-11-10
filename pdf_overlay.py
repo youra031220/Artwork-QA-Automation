@@ -69,11 +69,12 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 )],
             })
     else:
-        for row in page_rows.values():
+        for row_index, row in page_rows.items():
             color = _kind(row["status"], product_curve=row.get("curved", False))
             output.append({
                 "label": row["korean_text"], "kind": color,
                 "source": "원본 줄", "status": row["status"],
+                "line_index": row_index,
                 "rects": [rect_from_row(row)] + _citation_rects(row, evidence),
             })
     for item in identity_checks:
