@@ -118,6 +118,19 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
         raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
     except pytesseract.TesseractError as exc:
         raise RuntimeError("Tesseract 한국어 언어팩 설치를 확인하세요.") from exc
+    # A narrow one-line OCR pass can stop after the first Korean word.
+    # Retry as a single text block only for demonstrably truncated outputs.
+    korean_length = sum(bool(KOR.search(c["c"])) for c in chars)
+    result_korean_length = len(KOR.findall(result))
+    if (korean_length >= 10 and result_korean_length < korean_length * .60):
+        try:
+            alternative = pytesseract.image_to_string(
+                image, lang="kor+eng", config="--oem 3 --psm 6"
+            ).strip()
+            if len(KOR.findall(alternative)) > result_korean_length * 1.35:
+                result = alternative
+        except pytesseract.TesseractError:
+            pass  # Preserve the original OCR candidate as evidence.
     result = re.sub(r"\s+", " ", result)
     match = KOR.search(result)
     if not match:
@@ -281,6 +294,17 @@ NUMERIC_CONTEXT = re.compile(
 )
 
 
+def candidate_quality_warnings(native, candidate):
+    """Describe suspect OCR artifacts; never silently change the candidate."""
+    if not candidate:
+        return []
+    raw_latin = set(re.findall(r"\b[A-Za-z]{2,4}\b", native, re.I))
+    unexpected_latin = [
+        token for token in re.findall(r"\b[A-Za-z]{2,4}\b", candidate)
+        if token not in raw_latin and token.upper() not in {"QR", "AI"}
+    ]
+    return ["OCR 후보에 불확실한 영문 조각이 포함됨 · 원본 확인"] if unexpected_latin else []
+
 def numeric_peer_for(row, raw_lines):
     """Collect nearby standalone numeric glyphs as evidence, not auto-fixes."""
     if not re.search(r"(?:최대|수납|절약|내구성|스테인리스)", row["korean_text"]):
@@ -384,6 +408,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     elif broken:
                         warnings.append("손상된 글자 · OCR 원본 대조 필요")
                     warnings.extend(citation_warnings)
+                    warnings.extend(candidate_quality_warnings(native, candidate))
                     if citation_warnings and not numeric_discrepancy:
                         status = "영문 출처 대조 필요 · 원본 확인"
                     rows.append({
