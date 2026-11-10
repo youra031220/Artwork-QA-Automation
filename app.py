@@ -263,7 +263,7 @@ if st.session_state.get("qa_result"):
                         "추출 항목 선택",
                         range(len(boxes)),
                         format_func=lambda i: (
-                            f"{i + 1}. [{'문장 연결 확인 필요' if '문장 연결' in boxes[i]['status'] else ('수치 대조 필요' if '수치' in boxes[i]['status'] else boxes[i]['kind'])}] "
+                            f"{i + 1}. [{boxes[i].get('display_label', boxes[i]['kind'])}] "
                             f"{boxes[i]['label'][:75]}"
                         ),
                         key="overlay_item"
@@ -272,8 +272,10 @@ if st.session_state.get("qa_result"):
                     st.write("**추출 원문**")
                     st.write(picked["label"])
                     st.caption(f"출처: {picked['source']} · 상태: {picked['status']}")
-                    if "수치" in picked["status"]:
-                        st.error("수치 대조 필요: PDF 원본 숫자와 OCR 후보를 비교하세요.")
+                    if picked.get("display_label", "").startswith("수치 대조"):
+                        st.error("수치 대조 필요: 원본 PDF의 숫자·단위와 OCR 후보를 확인하세요.")
+                    elif picked.get("display_label", "").startswith("수치 포함"):
+                        st.info("수치 포함 문구입니다. 숫자와 단위를 PDF 원본과 대조하세요. 오류로 판정된 상태는 아닙니다.")
                     if picked["source"] == "추출 문단":
                         related = next((
                             g for g in grouped
