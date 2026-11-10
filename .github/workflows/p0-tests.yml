@@ -9,6 +9,8 @@ on:
       - 'test_p0.py'
       - 'test_p0_regressions.py'
       - 'test_p0_numeric.py'
+      - 'test_p0_overlay.py'
+      - 'pdf_overlay.py'
       - 'extractor.py'
       - 'layout.py'
       - 'embedded_reference.py'
@@ -24,5 +26,5 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install pymupdf pillow pytesseract
-      - run: python -m unittest -v test_p0 test_p0_regressions test_p0_numeric
+      - run: python -m unittest -v test_p0 test_p0_regressions test_p0_numeric test_p0_overlay
       - run: python -m py_compile app.py extractor.py layout.py product_identity.py pdf_overlay.py excel_loader.py product_parser.py
