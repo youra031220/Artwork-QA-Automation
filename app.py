@@ -269,8 +269,12 @@ if st.session_state.get("qa_result"):
                         key="overlay_item"
                     )
                     picked = boxes[item_index]
-                    st.write("**추출 원문**")
-                    st.write(picked["label"])
+                    st.write("**원본 추출 문구**")
+                    st.write(picked.get("original_label", picked["label"]))
+                    if picked.get("context_candidates"):
+                        st.write("**주변 PDF 문구 (문장 연결 미확정)**")
+                        st.write(" / ".join(picked["context_candidates"]))
+                        st.caption("주변 실제 PDF 객체이며, 숫자와 문장을 확정 결합하거나 승인한 결과가 아닙니다.")
                     st.caption(f"출처: {picked['source']} · 상태: {picked['status']}")
                     if picked.get("display_label", "").startswith("수치 대조"):
                         st.error("수치 대조 필요: 원본 PDF의 숫자·단위와 OCR 후보를 확인하세요.")
@@ -281,7 +285,7 @@ if st.session_state.get("qa_result"):
                             g for g in grouped
                             if g["file"] == view_file
                             and int(g["page"]) == int(view_page)
-                            and g["paragraph"] == picked["label"]
+                            and g["paragraph"] == picked.get("original_label", picked["label"])
                         ), None)
                         if related and related.get("warnings"):
                             st.write("검토 사유:", related["warnings"])
