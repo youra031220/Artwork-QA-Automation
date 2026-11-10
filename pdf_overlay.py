@@ -1,22 +1,58 @@
 """PDF text evidence overlay with coordinate-accurate per-line highlights."""
 import io
+import re
 import fitz
 from PIL import Image, ImageDraw
 
 COLORS = {
     "한국어": "#2788DA",
     "OCR 확인": "#1B9E77",
+    "수치 확인": "#D94A4A",
     "곡선": "#F39C12",
     "전면 제품명": "#8A49C7",
     "GAMME": "#E64C59",
     "PRODUIT": "#77818E",
 }
 
-def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True):
+def _citation_rects(row, evidence):
+    """Per-line observed English citation rectangles; never fabricate positions."""
+    if not row.get("source_citation"):
+        return []
+    result = []
+    for item_id in row.get("raw_evidence_ids", []):
+        entry = evidence.get(item_id)
+        if not entry:
+            continue
+        source = entry.get("text", "")
+        chars = [c for span in entry.get("spans", []) for c in span.get("chars", [])]
+        for match in re.finditer(
+            r"Euromonitor\s+International(?:\s+Limited)?"
+            r"|Limited\s*,?\s*Home\s+and\s+Garden\s+\d{4}"
+            r"|Home\s+and\s+Garden\s+\d{4}", source, re.I
+        ):
+            boxes = [c["bbox"] for c in chars[match.start():match.end()] if "bbox" in c]
+            if boxes:
+                result.append([min(b[0] for b in boxes), min(b[1] for b in boxes),
+                               max(b[2] for b in boxes), max(b[3] for b in boxes)])
+    return result
+
+
+def _kind(status, curved=False, product_curve=False):
+    if "수치" in status:
+        return "수치 확인"
+    if "확인" in status or "OCR" in status or "복원" in status:
+        return "OCR 확인"
+    return "곡선" if product_curve else "한국어"
+
+def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True, raw_summaries=None):
     """Use original line rectangles, not a guessed paragraph bounding box."""
     output = []
     page_rows = {(i): row for i, row in enumerate(rows)
                  if row["file"] == filename and int(row["page"]) == page}
+    evidence = {item["id"]: item
+                for summary in (raw_summaries or [])
+                if summary.get("file") == filename and int(summary.get("page", -1)) == page
+                for item in summary.get("raw_evidence", [])}
     if group_view:
         for group in groups:
             if group["file"] != filename or int(group["page"]) != page:
@@ -24,28 +60,21 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
             indices = [i for i in group["line_indices"] if i in page_rows]
             if not indices:
                 continue
-            color = "곡선" if group["type"] == "곡선 제품명" else (
-                "OCR 확인" if any(
-                    "후보" in page_rows[i]["status"] or
-                    "확인" in page_rows[i]["status"] and not page_rows[i].get("curved")
-                    for i in indices
-                ) else "한국어"
-            )
+            color = _kind(group["status"], product_curve=group["type"] == "곡선 제품명")
             output.append({
                 "label": group["paragraph"], "kind": color,
                 "source": "추출 문단", "status": group["status"],
-                "rects": [rect_from_row(page_rows[i]) for i in indices],
+                "rects": [rect for i in indices for rect in (
+                    [rect_from_row(page_rows[i])] + _citation_rects(page_rows[i], evidence)
+                )],
             })
     else:
         for row in page_rows.values():
-            color = "곡선" if row.get("curved") else (
-                "OCR 확인" if "후보" in row["status"] or "부분 복원" in row["status"]
-                else "한국어"
-            )
+            color = _kind(row["status"], product_curve=row.get("curved", False))
             output.append({
                 "label": row["korean_text"], "kind": color,
                 "source": "원본 줄", "status": row["status"],
-                "rects": [rect_from_row(row)],
+                "rects": [rect_from_row(row)] + _citation_rects(row, evidence),
             })
     for item in identity_checks:
         if item["file"] != filename or int(item["page"]) != page or item.get("x0") is None:
