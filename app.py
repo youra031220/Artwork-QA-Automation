@@ -5,7 +5,7 @@ from layout import group_paragraphs
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, COLORS
 from product_parser import parse_product_pdf
-from excel_loader import parse_reference_excel
+from embedded_reference import load_master
 import io
 import zipfile
 import json
@@ -16,13 +16,11 @@ st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출",
 st.title("아트웍 검수 자동화")
 st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
-reference_xlsx = st.file_uploader("P0 · 검수 기준 Excel 업로드", type=["xlsx"], key="rules_xlsx")
-if reference_xlsx is not None:
-    try:
+try:
         @st.cache_data(show_spinner=False)
-        def load_p0_master(content):
-            return parse_reference_excel(content)
-        master = load_p0_master(reference_xlsx.getvalue())
+        def load_p0_master():
+            return load_master()
+        master = load_p0_master()
         st.subheader("P0 · Excel 기준 데이터")
         a, b, c, d = st.columns(4)
         a.metric("문구 수", len(master["phrases"]))
@@ -47,9 +45,9 @@ if reference_xlsx is not None:
             "P0 구조화 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
             file_name="artwork_rules_p0.json", mime="application/json"
         )
-        st.caption("Excel 원본은 수정하지 않으며 승인 상태는 확인 전입니다.")
-    except Exception as exc:
-        st.error("Excel 해석 실패: " + str(exc))
+        st.caption("기준 문구 240개를 코드에서 자동 로딩합니다. D229 영문 오타는 수정했으며, 나머지 원문은 유지했습니다. 승인 상태는 별도 확인 대상입니다.")
+except Exception as exc:
+    st.error("내장 검수 기준 로딩 실패: " + str(exc))
 
 col1, col2 = st.columns(2)
 with col1:
