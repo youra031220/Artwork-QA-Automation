@@ -25,25 +25,29 @@ def _citation_rects(row, evidence):
             continue
         source = entry.get("text", "")
         chars = [c for span in entry.get("spans", []) for c in span.get("chars", [])]
-        # Multi-language legal copy can contain many unrelated instances of
-        # the same citation in one PDF line. Select the fragment nearest the
-        # Korean edition, not every English occurrence in that line.
-        hangul = re.search(r"[가-힣]", source)
-        before_korean = source[:hangul.start()] if hangul else source
-        matches = list(re.finditer(
+        # Multilingual legal lines contain unrelated source attributions.
+        # Identify the source nearest this Korean reference, even when the
+        # name follows Korean words on the *preceding* line.
+        korean = re.search(r"[가-힣]", source)
+        prefix = source[:korean.start()] if korean else source
+        full = list(re.finditer(
             r"Euromonitor\s+International\s+Limited\s*,?\s*"
-            r"Home\s+and\s+Garden\s+\d{4}"
-            r"|Euromonitor\s+International(?:\s+Limited)?"
-            r"|Limited\s*,?\s*Home\s+and\s+Garden\s+\d{4}",
-            before_korean, re.I
+            r"Home\s+and\s+Garden\s+\d{4}", prefix, re.I
         ))
-        if not matches:
+        trailing = list(re.finditer(
+            r"Euromonitor\s+International(?:\s+Limited)?", source, re.I
+        ))
+        beginning = list(re.finditer(
+            r"Limited\s*,?\s*Home\s+and\s+Garden\s+\d{4}", prefix, re.I
+        ))
+        if full:
+            match = full[-1]
+        elif trailing and len(source) - trailing[-1].end() < 12:
+            match = trailing[-1]
+        elif beginning:
+            match = beginning[0]
+        else:
             continue
-        # The preceding line contributes the last citation fragment; the
-        # current line starts with Limited... immediately before Korean text.
-        match = matches[-1]
-        if "Limited" in source and not re.search(r"Euromonitor", before_korean, re.I):
-            match = matches[0]
         boxes = [c["bbox"] for c in chars[match.start():match.end()] if "bbox" in c]
         if boxes:
             result.append([min(b[0] for b in boxes), min(b[1] for b in boxes),
