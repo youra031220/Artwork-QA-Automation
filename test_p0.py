@@ -4,6 +4,7 @@ import unittest
 from zipfile import ZipFile
 import fitz
 from excel_loader import parse_reference_excel
+from embedded_reference import load_master, rows as embedded_rows
 from product_parser import parse_product_pdf
 
 
@@ -57,6 +58,23 @@ def sample_pdf(style):
 
 
 class P0Tests(unittest.TestCase):
+    def test_embedded_reference_and_corrected_typo(self):
+        reference = embedded_rows()
+        self.assertEqual(len(reference), 240)
+        self.assertEqual(reference[0][0], 6)
+        self.assertEqual(reference[-1][0], 245)
+        fixed = next(row for row in reference if row[0] == 229)
+        self.assertEqual(
+            fixed[3],
+            "Before first use, wash then wipe the coating with cooking oil."
+        )
+        master = load_master()
+        self.assertEqual(len(master["phrases"]), 240)
+        self.assertEqual(
+            next(p for p in master["phrases"] if p["source_row"] == 229)["english_original"],
+            fixed[3]
+        )
+
     def test_excel_inherits_category_and_tracks_rows(self):
         data = parse_reference_excel(sample_excel())
         self.assertEqual(len(data["phrases"]), 3)
