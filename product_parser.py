@@ -79,7 +79,9 @@ def _field(lines, labels, page_width, page_height, field=""):
         if field == "scale":
             return 20 if re.search(r"\b\d+\s*:\s*\d+\b", value) else -30
         if field == "dossier":
-            return 20 if re.search(r"\b(?:CST|[A-Z]{2,}[-_]\d+)", value, re.I) else 0
+            return 25 if re.search(r"\bCST(?:\s+|[-_])\d", value, re.I) else -100
+        if field == "client":
+            return 20 if re.fullmatch(r"(?:TEFAL|GROUPE\s+SEB)", value, re.I) else -100
         return 0
 
     choices = []
