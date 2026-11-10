@@ -59,6 +59,14 @@ def korean_segment(line):
     )
     if numeric_prefix:
         start = min(start, numeric_prefix.start(1))
+    # Damaged digits can precede the first Korean glyph, e.g.
+    # "��% 수납" and "��/�� 스테인리스". Do not discard them.
+    damaged_numeric_prefix = re.search(
+        r"(?:\ufffd{1,6}\s*/\s*\ufffd{1,6}|\ufffd{1,6}\s*%)\s*$",
+        preceding,
+    )
+    if damaged_numeric_prefix:
+        start = min(start, damaged_numeric_prefix.start())
     # Retain the initial QR/AI prefix when it belongs to Korean wording.
     prefix = text[max(0, start - 3):start]
     leading = re.search(r"(?:QR|AI)\s*$", prefix)
