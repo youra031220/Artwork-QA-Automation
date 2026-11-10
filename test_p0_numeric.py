@@ -123,6 +123,46 @@ class NumericPipelineTests(unittest.TestCase):
         self.assertIn("최대 ��% 수납", joined[0]["paragraph"])
         self.assertTrue(joined[0]["numeric_review"])
 
+    def test_standalone_maximum_explains_unresolved_link(self):
+        row = {
+            "file": "sample.pdf", "page": 1, "block_id": 4,
+            "line_id": 5, "korean_text": "최대",
+            "curved": False, "font_size": 10,
+            "dir_x": 1, "dir_y": 0,
+            "x0": 200, "y0": 100, "x1": 220, "y1": 111,
+            "status": "수치 대조 필요 · 숫자 객체 연결 확인",
+            "numeric_review": True,
+            "numeric_peer_evidence": [{"text": "40%", "bbox": [230, 100, 255, 111]}],
+        }
+        group = group_paragraphs([row])[0]
+        self.assertIn("연결 확인 필요", group["paragraph"])
+        self.assertEqual(group["type"], "문장 연결 확인")
+        self.assertIn("문장 연결 확인 필요", group["status"])
+        self.assertTrue(group["numeric_review"])
+        self.assertEqual(group["numeric_peer_evidence"][0]["text"], "40%")
+        self.assertEqual(row["korean_text"], "최대")
+
+    def test_maximum_joins_only_adjacent_following_claim(self):
+        base = {
+            "file": "sample.pdf", "page": 1,
+            "curved": False, "font_size": 10, "dir_x": 1, "dir_y": 0,
+            "status": "원본 추출 정상", "numeric_review": False,
+        }
+        left = dict(base, block_id=1, line_id=0,
+                    korean_text="최대", x0=100, y0=100, x1=123, y1=110)
+        right = dict(base, block_id=2, line_id=0,
+                     korean_text="��% 수납 공간 절약", x0=127, y0=100, x1=250, y1=110,
+                     numeric_review=True, status="수치 대조 필요 · 원본 확인")
+        merged = group_paragraphs([left, right])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["paragraph"], "최대 ��% 수납 공간 절약")
+        self.assertIn("수치", merged[0]["status"])
+        far = dict(right, x0=620, x1=740)
+        separate = group_paragraphs([left, far])
+        self.assertEqual(len(separate), 2)
+        unrelated = dict(right, korean_text="완전히 무관한 광고 문구")
+        self.assertEqual(len(group_paragraphs([left, unrelated])), 2)
+
     def test_numeric_warning_reaches_paragraph_json(self):
         row = {
             "file": "sample.pdf", "page": 1, "curved": False,
