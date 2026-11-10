@@ -127,8 +127,8 @@ def check_product_identity(pdf_bytes, filename):
     try:
         for page in doc:
             lines = visible_lines(page)
-            sheet_range = _find_sheet_value(lines, "GAMME")
-            sheet_product = _find_sheet_value(lines, "PRODUIT")
+            sheet_range = (_find_sheet_value(lines, "NOM GAMME") or _find_sheet_value(lines, "GAMME"))
+            sheet_product = (_find_sheet_value(lines, "DESCRIPTION") or _find_sheet_value(lines, "PRODUIT"))
             gamme = sheet_range[0][1] if sheet_range else ""
             produit = sheet_product[0][1] if sheet_product else ""
 
@@ -141,7 +141,7 @@ def check_product_identity(pdf_bytes, filename):
                 if expected and item["font_size"] >= 12
                 and item["direction"][0] > .8
                 and not re.match(
-                    r"^(?:GAMME|PRODUIT|CLIENT|DOSSIER|ECHELLE|ÉCHELLE)\b",
+                    r"^(?:NOM GAMME|GAMME|DESCRIPTION|PRODUIT|CLIENT|DOSSIER|ECHELLE|ÉCHELLE)\b",
                     item["text"], re.I
                 )
                 and SequenceMatcher(None, expected, normalize(item["text"])).ratio() >= .72
