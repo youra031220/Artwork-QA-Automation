@@ -33,7 +33,8 @@ class SourceOverlayTests(unittest.TestCase):
         boxes = collect_boxes([row], [group], [], "synthetic.pdf", 1,
                               group_view=True, raw_summaries=summaries)
         self.assertEqual(len(boxes), 1)
-        self.assertEqual(boxes[0]["kind"], "한국어")
+        self.assertEqual(boxes[0]["kind"], "수치 포함")
+        self.assertEqual(boxes[0]["display_label"], "수치 포함 · 확인 권장")
         self.assertEqual(len(boxes[0]["rects"]), 3)
         self.assertTrue(any(r[1] == 40 for r in boxes[0]["rects"]))
         self.assertTrue(any(r[1] == 53 and r[0] == 30 for r in boxes[0]["rects"]))
