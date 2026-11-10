@@ -207,16 +207,22 @@ if st.session_state.get("qa_result"):
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
         c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows)
+        numeric_reviews = [g for g in grouped if g.get("numeric_review")]
+        if numeric_reviews:
+            st.warning(
+                f"수치 확인이 필요한 문단 {len(numeric_reviews)}건이 있습니다. "
+                "OCR 후보와 PDF 원본을 비교해야 하며 자동 승인되지 않습니다."
+            )
         st.subheader("추출 문구 정리")
         st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
         st.dataframe(
-            groups_df[["file", "page", "type", "paragraph", "line_count", "status"]],
+            groups_df[["file", "page", "type", "paragraph", "line_count", "status", "warnings", "numeric_review", "ocr_candidates"]],
             use_container_width=True, hide_index=True
         )
         with st.expander("원본 줄별 추출 결과 보기"):
             st.dataframe(
-                df[["file", "page", "korean_text", "status", "pdf_original", "ocr_candidate"]],
+                df[["file", "page", "korean_text", "status", "warnings", "numeric_review", "pdf_original", "ocr_candidate", "numeric_peer_evidence"]],
                 use_container_width=True, hide_index=True
             )
         st.subheader("PDF 전체 추출 위치 확인")
