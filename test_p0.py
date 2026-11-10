@@ -32,19 +32,19 @@ def sample_pdf(style):
     page = doc.new_page(width=720, height=980)
     if style == "texto":
         data = [
-            (30, 40, "NOM GAMME"), (180, 40, "Mint Calm"),
+            (30, 40, "NOM GAMME"), (180, 40, "Sample Range"),
             (30, 55, "DESCRIPTION"), (180, 55, "Faitout 24 cm + CV"),
             (30, 70, "DOSSIER"), (180, 70, "CST 13 26 0129"),
-            (300, 120, "CMMF 2100148219"),
+            (300, 120, "CMMF 1234567890"),
             (240, 300, "MADE IN CHINA"),
             (240, 330, "ALL HOBS EXCEPT INDUCTION"),
             (240, 365, "5,2 L - 4"),
         ]
     else:
         data = [
-            (30, 40, "GAMME G7 ESSENTIAL START UNCOATED"),
+            (30, 40, "GAMME G7 SAMPLE SERIES"),
             (30, 55, "PRODUIT"), (180, 55, "CASSEROLE 16 cm + CV"),
-            (250, 180, "CMMF 2100148571"),
+            (250, 180, "CMMF 1234567891"),
             (250, 270, "FABRIQUE AU VIETNAM - MADE IN VIETNAM"),
             (250, 320, "ALL HOBS + INDUCTION"),
             (250, 365, "1,7 L - 1"),
@@ -67,17 +67,17 @@ class P0Tests(unittest.TestCase):
 
     def test_texto_layout(self):
         result = parse_product_pdf(sample_pdf("texto"), "fixture.pdf")
-        self.assertEqual(result["range_name"].casefold(), "mint calm")
+        self.assertEqual(result["range_name"].casefold(), "sample range")
         self.assertEqual(result["product_type_standard"], "STEWPOT")
         self.assertEqual(result["size_cm"], 24)
         self.assertTrue(result["has_lid"])
         self.assertEqual(result["manufacturing_country"], "CHINA")
         self.assertFalse(result["induction_compatible"])
-        self.assertEqual(result["cmmf"], "2100148219")
+        self.assertEqual(result["cmmf"], "1234567890")
 
     def test_publicis_layout(self):
         result = parse_product_pdf(sample_pdf("publicis"), "fixture.pdf")
-        self.assertEqual(result["range_name"], "ESSENTIAL START UNCOATED")
+        self.assertEqual(result["range_name"], "SAMPLE SERIES")
         self.assertEqual(result["product_type_standard"], "SAUCEPAN")
         self.assertEqual(result["size_cm"], 16)
         self.assertEqual(result["manufacturing_country"], "VIETNAM")
@@ -86,7 +86,7 @@ class P0Tests(unittest.TestCase):
     def test_address_not_origin(self):
         raw = sample_pdf("texto")
         with fitz.open(stream=raw, filetype="pdf") as doc:
-            doc[0].insert_text((200, 600), "Tefal S.A.S France", fontsize=10)
+            doc[0].insert_text((200, 600), "Example Company France", fontsize=10)
             modified = doc.tobytes()
         result = parse_product_pdf(modified, "fixture.pdf")
         self.assertEqual(result["manufacturing_country"], "CHINA")
