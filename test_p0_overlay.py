@@ -43,8 +43,24 @@ class SourceOverlayTests(unittest.TestCase):
         row = {"source_citation": "Euromonitor International Limited, Home and Garden 2026",
                "raw_evidence_ids": ["p1:b5:l0"]}
         rects = _citation_rects(row, {line["id"]: line})
-        self.assertEqual(len(rects), 2)
+        self.assertEqual(len(rects), 1)
         self.assertTrue(all(r[0] >= 25 for r in rects))
+
+    def test_multilingual_line_highlights_only_korean_source(self):
+        dutch = "Limited, Home and Garden 2026 editie. / "
+        korean = "테팔 세계판매 �위 주방용품. "
+        english = "Euromonitor International "
+        line = evidence(dutch + korean + english, "p1:b8:l9", 25, 40)
+        next_line = evidence("Limited, Home and Garden 2026 에디션", "p1:b8:l10", 20, 55)
+        row = {
+            "source_citation": "Euromonitor International Limited, Home and Garden 2026",
+            "raw_evidence_ids": ["p1:b8:l10", "p1:b8:l9"],
+        }
+        boxes = _citation_rects(row, {line["id"]: line, next_line["id"]: next_line})
+        self.assertEqual(len(boxes), 2)
+        expected_x = 25 + (len(dutch) + len(korean)) * 5
+        self.assertTrue(any(abs(box[0] - expected_x) < 1 for box in boxes), boxes)
+        self.assertFalse(any(box[0] == 25 for box in boxes))
 
     def test_numeric_review_has_own_kind_in_list(self):
         row = {"file": "synthetic.pdf", "page": 1, "korean_text": "최대 ��% 수납",
