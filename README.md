@@ -17,7 +17,7 @@ python -m streamlit run app.py
 
 ## P0 · 승인 문구 구조화와 제품정보 범용화
 
-P0 기능은 기존 한국어/OCR 추출과 별개로 실행합니다. 로컬 Streamlit에서 사내 검수 기준 Excel을 직접 업로드하면 \`excel_loader.py\`가 원본 파일을 바꾸지 않고 \`phrases\`, \`rules\`, \`variants\`, \`validation_issues\`를 생성합니다. 업로드 데이터는 공개 저장소에 포함하지 않습니다.
+P0 기능은 기존 한국어/OCR 추출과 별개로 실행합니다. **Excel 업로드 없이** `embedded_reference.py`에 내장된 240개 EN–KO 문구를 자동 로딩하고, `excel_loader.py`가 `phrases`, `rules`, `variants`, `validation_issues`를 생성합니다. D229 영문 `Before rst use`는 `Before first use`로 정정했으며, 그 외 모호한 번역은 임의로 수정하지 않았습니다. 사용자로부터 코드 포함에 대한 보안상 허가를 받았습니다.
 
 - Excel 규칙은 행 단위 문구와 조건 단위 그룹을 구별합니다. 특히 '품질 보증 / 사용법' 카테고리 안의 선택 1개·전체 필수 등 서로 다른 조건을 개별 Rule로 보관합니다.
 - 문구 승인 여부는 \`UNVERIFIED\`로 표시합니다. 빈 값, 중복 EN–KO 쌍, 동일 EN 복수 번역, 조건/Remark 모호성을 검토 이슈로 보존합니다.
@@ -28,7 +28,7 @@ P0 기능은 기존 한국어/OCR 추출과 별개로 실행합니다. 로컬 St
 
 ### 비공개 자료 테스트
 
-실제 회사 PDF/Excel은 로컬에서만 테스트하세요. 저장소의 \`test_p0.py\`와 GitHub Actions 워크플로는 가상 문구·가상 식별정보로만 테스트합니다.
+실제 회사 PDF는 로컬에서만 테스트하세요. 검수 문구는 요청에 따라 코드에 포함되어 있으나 회사 아트웍 원본 파일은 포함하지 않았습니다. 저장소의 \`test_p0.py\`와 GitHub Actions 워크플로는 가상 문구·가상 식별정보로만 테스트합니다.
 
 \`\`\`powershell
 python -m unittest -v test_p0
