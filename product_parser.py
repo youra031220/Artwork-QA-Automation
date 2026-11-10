@@ -157,6 +157,23 @@ def parse_product_pdf(pdf_bytes, filename):
             for field, labels in LABELS.items():
                 value, evidence = _field(page_lines, labels, page.rect.width, page.rect.height, field)
                 if value:
+                    # A value can be embedded in the same PDF line as its
+                    # label. Locate the value's own glyph rectangle; using
+                    # the whole label line puts the evidence box in the wrong
+                    # place (BUG-04).
+                    matches = page.search_for(value)
+                    if matches and evidence:
+                        origin = fitz.Rect(*evidence["bbox"])
+                        best = min(
+                            matches,
+                            key=lambda rect: abs(rect.y0 - origin.y0)
+                            + abs(rect.x0 - origin.x0) * .1,
+                        )
+                        if abs(best.y0 - origin.y0) <= max(15, page.rect.height * .025):
+                            evidence = dict(evidence, bbox=[
+                                round(best.x0, 2), round(best.y0, 2),
+                                round(best.x1, 2), round(best.y1, 2),
+                            ], original_text=value)
                     result[field] = value
                     result["evidence"][field] = [evidence]
         if result["range_name"]:
