@@ -8,6 +8,7 @@ COLORS = {
     "한국어": "#2788DA",
     "OCR 확인": "#1B9E77",
     "수치 확인": "#D94A4A",
+    "문장 연결": "#9B6BCC",
     "곡선": "#F39C12",
     "전면 제품명": "#8A49C7",
     "GAMME": "#E64C59",
@@ -56,6 +57,8 @@ def _citation_rects(row, evidence):
 
 
 def _kind(status, curved=False, product_curve=False):
+    if "문장 연결" in status:
+        return "문장 연결"
     if "수치" in status:
         return "수치 확인"
     if "확인" in status or "OCR" in status or "복원" in status:
