@@ -29,9 +29,8 @@ class NumericPipelineTests(unittest.TestCase):
                        "1위", "16cm", "1.7L", "4개", "2 YEARS", "No.1"):
             self.assertTrue(numeric_tokens(phrase), phrase)
             self.assertFalse(numeric_evidence_disagrees(phrase, phrase))
-        self.assertTrue(numeric_evidence_disagrees("최대 40% 수납", "최대 409 수납") is False)
-        # 409 alone is not a recognized formatted claim: compare the
-        # visibly damaged native source in extraction instead.
+        self.assertTrue(numeric_evidence_disagrees("최대 40% 수납", "최대 409 수납"))
+        # A missing percent sign in OCR is a numeric mismatch.
         self.assertTrue(numeric_evidence_disagrees("최대 40% 수납", "최대 30% 수납"))
 
     def test_numeric_prefix_preserved(self):
