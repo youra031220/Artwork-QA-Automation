@@ -157,3 +157,55 @@ def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True):
                                    fill=(255, 215, 0, 42),
                                    outline="#FFB500", width=6)
         return Image.alpha_composite(original, overlay).convert("RGB")
+
+
+def render_selected_crop(pdf_bytes, page_number, item, margin=24):
+    """Render just the selected native PDF rectangles at readable resolution.
+
+    Handles split paragraphs by taking the union of their distinct glyph
+    rectangles; does not alter or infer the source coordinates. Return None
+    for a selection without valid boxes.
+    """
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        page = doc[page_number - 1]
+        rotated = []
+        for values in item.get("rects", []):
+            try:
+                rect = fitz.Rect(*[float(value) for value in values])
+            except (ValueError, TypeError, IndexError):
+                continue
+            if rect.is_empty or rect.is_infinite:
+                continue
+            visible = (rect * page.rotation_matrix) & page.rect
+            if not visible.is_empty:
+                rotated.append(visible)
+        if not rotated:
+            return None
+        bounds = fitz.Rect(rotated[0])
+        for rect in rotated[1:]:
+            bounds |= rect
+        margin_x = max(float(margin), min(50, bounds.width * .18))
+        margin_y = max(14.0, min(35.0, bounds.height * .50))
+        crop = fitz.Rect(bounds.x0 - margin_x, bounds.y0 - margin_y,
+                         bounds.x1 + margin_x, bounds.y1 + margin_y) & page.rect
+        if crop.is_empty:
+            return None
+        # Crop directly from the vector PDF, not from a downscaled page image.
+        zoom = min(4.0, 1800.0 / max(1, crop.width),
+                   1100.0 / max(1, crop.height))
+        zoom = max(.5, zoom)
+        pix = page.get_pixmap(clip=crop, matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        for rect in rotated:
+            x0 = round(rect.x0 * zoom - pix.x)
+            y0 = round(rect.y0 * zoom - pix.y)
+            x1 = round(rect.x1 * zoom - pix.x)
+            y1 = round(rect.y1 * zoom - pix.y)
+            x0, x1 = sorted((max(0, min(image.width - 1, x0)),
+                             max(0, min(image.width - 1, x1))))
+            y0, y1 = sorted((max(0, min(image.height - 1, y0)),
+                             max(0, min(image.height - 1, y1))))
+            if x1 > x0 and y1 > y0:
+                draw.rectangle((x0, y0, x1, y1), outline="#E6A100", width=4)
+        return image
