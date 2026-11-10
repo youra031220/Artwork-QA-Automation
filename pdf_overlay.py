@@ -68,6 +68,42 @@ def _kind(status, curved=False, product_curve=False):
     return "곡선" if product_curve else "한국어"
 
 
+def _maximum_context(row, evidence):
+    """Nearby native numeric and Korean objects for visual inspection only.
+
+    No inferred numeric value is inserted into the extracted source sentence.
+    """
+    if row.get("korean_text", "").strip() != "최대":
+        return []
+    anchor = fitz.Rect(*rect_from_row(row))
+    selected = {"number": None, "phrase": None}
+    for item in evidence.values():
+        value = item.get("text", "").strip()
+        if re.fullmatch(r"\d{1,4}(?:[.,]\d+)?\s*(?:%|배|년|위)", value):
+            kind = "number"
+        elif (re.fullmatch(r"[가-힣]+(?:\s+[가-힣]+){1,7}", value)
+              and 4 <= len(value) <= 36):
+            kind = "phrase"
+        else:
+            continue
+        rect = fitz.Rect(item.get("bbox", []))
+        if rect.is_empty or rect.is_infinite:
+            continue
+        horizontal = max(0, rect.x0-anchor.x1, anchor.x0-rect.x1)
+        vertical = max(0, rect.y0-anchor.y1, anchor.y0-rect.y1)
+        if horizontal > 100 or vertical > 90:
+            continue
+        distance = horizontal + vertical + .1*abs(rect.y0-anchor.y0)
+        previous = selected[kind]
+        if previous is None or distance < previous[0]:
+            selected[kind] = (distance, value, list(rect))
+    return [
+        {"kind": kind, "text": selected[kind][1],
+         "rect": selected[kind][2]}
+        for kind in ("number", "phrase") if selected[kind] is not None
+    ]
+
+
 def numeric_display_label(text, status, numeric_review=False, numeric_peers=None):
     """A normal numeric phrase is reviewable, not necessarily erroneous."""
     if numeric_review or "수치 대조 필요" in status:
@@ -107,13 +143,26 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                      else "수치 포함" if numeric_label.startswith("수치 포함")
                      else _kind(group["status"],
                                 product_curve=group["type"] == "곡선 제품명"))
+            claim_context = [
+                hit for i in indices
+                for hit in _maximum_context(page_rows[i], evidence)
+            ]
+            context_labels = [hit["text"] for hit in claim_context]
+            display_text = (
+                "최대 · 주변 PDF: " + " / ".join(context_labels)
+                + " (연결 확인)"
+                if group.get("type") == "문장 연결 확인" and context_labels
+                else group["paragraph"]
+            )
             output.append({
-                "label": group["paragraph"], "kind": color,
+                "label": display_text, "kind": color,
                 "source": "추출 문단", "status": group["status"],
+                "original_label": group["paragraph"],
+                "context_candidates": context_labels,
                 "display_label": numeric_label or color,
-                "rects": [rect for i in indices for rect in (
+                "rects": ([rect for i in indices for rect in (
                     [rect_from_row(page_rows[i])] + _citation_rects(page_rows[i], evidence)
-                )],
+                )] + [hit["rect"] for hit in claim_context]),
             })
     else:
         for row_index, row in page_rows.items():
@@ -125,12 +174,20 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
             color = ("수치 확인" if numeric_label.startswith("수치 대조")
                      else "수치 포함" if numeric_label.startswith("수치 포함")
                      else _kind(row["status"], product_curve=row.get("curved", False)))
+            claim_context = _maximum_context(row, evidence)
+            display_text = (
+                "최대 · 주변 PDF: " + " / ".join(hit["text"] for hit in claim_context)
+                + " (연결 확인)" if claim_context else row["korean_text"]
+            )
             output.append({
-                "label": row["korean_text"], "kind": color,
+                "label": display_text, "kind": color,
                 "source": "원본 줄", "status": row["status"],
+                "original_label": row["korean_text"],
+                "context_candidates": [hit["text"] for hit in claim_context],
                 "display_label": numeric_label or color,
                 "line_index": row_index,
-                "rects": [rect_from_row(row)] + _citation_rects(row, evidence),
+                "rects": ([rect_from_row(row)] + _citation_rects(row, evidence)
+                          + [hit["rect"] for hit in claim_context]),
             })
     for item in identity_checks:
         if item["file"] != filename or int(item["page"]) != page or item.get("x0") is None:
