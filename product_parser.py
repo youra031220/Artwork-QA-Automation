@@ -172,9 +172,20 @@ def parse_product_pdf(pdf_bytes, filename):
                             + abs(rect.x0 - origin.x0) * .1,
                         )
                         if abs(best.y0 - origin.y0) <= max(15, page.rect.height * .025):
+                            # search_for may split G7 / name / suffix into
+                            # several rectangles because artwork fonts change.
+                            # Merge only hits on the same ticket line.
+                            same_line = [
+                                rect for rect in matches
+                                if abs(rect.y0 - best.y0) <= 14
+                                and abs(rect.x0 - best.x0) <= 350
+                            ]
+                            value_box = fitz.Rect(best)
+                            for rect in same_line:
+                                value_box |= rect
                             evidence = dict(evidence, bbox=[
-                                round(best.x0, 2), round(best.y0, 2),
-                                round(best.x1, 2), round(best.y1, 2),
+                                round(value_box.x0, 2), round(value_box.y0, 2),
+                                round(value_box.x1, 2), round(value_box.y1, 2),
                             ], original_text=value)
                     result[field] = value
                     result["evidence"][field] = [evidence]
