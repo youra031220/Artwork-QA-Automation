@@ -376,7 +376,12 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         "native_numeric_tokens": sorted(source_numbers),
                         "ocr_numeric_tokens": sorted(ocr_numbers),
                         "warnings": warnings,
-                        "raw_evidence_ids": [evidence_id],
+                        "raw_evidence_ids": [evidence_id] + (
+                            [f"p{page_num}:b{block_id}:l{line_id-1}"]
+                            if line_id > 0 and "Euromonitor" in citation
+                            and "Euromonitor" not in full_text
+                            else []
+                        ),
                         "source_citation": citation,
                         "x0": round(min(c["bbox"][0] for c in chars), 1),
                         "y0": round(min(c["bbox"][1] for c in chars), 1),
