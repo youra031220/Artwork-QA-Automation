@@ -35,6 +35,17 @@ python -m unittest -v test_p0
 python -m py_compile app.py extractor.py layout.py product_identity.py pdf_overlay.py excel_loader.py product_parser.py
 \`\`\`
 
+### 2026-11-10 P0 QA 오류 대응
+
+Chrome QA에서 보고된 P0 FAIL 가운데 BUG-01~05의 원인을 수정했습니다. **앱 브라우저 재시험 전에는 PASS로 간주하지 않습니다.**
+
+- BUG-01: 제작정보의 라벨과 값이 분리된 디자인에서 같은 행·인접 좌표 및 제품유형 의미를 함께 검증합니다. `+ CV`가 확인되지 않으면 `has_lid=False`로 단정하지 않습니다.
+- BUG-02: 제품명 비교는 공통 작업정보 파서를 사용해 프랑스어 법정 문구의 GAMME를 오인하지 않습니다. 전면 제목의 수식어 차이는 REVIEW입니다.
+- BUG-03: 한국어 앞 숫자 접두어 및 Euromonitor 인용을 보존하고 불일치는 수치 대조 필요로 표시합니다. OCR만으로 숫자를 확정하지 않습니다.
+- BUG-04: 작업정보 값의 실제 좌표를 찾아 증거 박스를 수정합니다.
+- BUG-05: 긴 세로 문장은 곡선 제품명으로 취급하지 않아 문장부호를 보존합니다.
+
+비공개 실물 PDF를 GitHub에 올리지 않고 로컬에서 재검증해야 합니다. 합성 회귀 테스트는 `test_p0_regressions.py`를 참조하세요.
 ## 제품명 교차 검수
 
 - **주 판정:** PDF 패키지 전면의 큰 제품명과 PDF 작업정보 `GAMME` 또는 `NOM GAMME`의 제품명을 비교합니다. 내부 접두어 `G7` 등은 제거합니다.
