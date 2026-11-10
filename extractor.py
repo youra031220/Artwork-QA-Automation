@@ -241,6 +241,30 @@ NUMERIC_CONTEXT = re.compile(
 )
 
 
+def numeric_peer_for(row, raw_lines):
+    """Collect nearby standalone numeric glyphs as evidence, not auto-fixes."""
+    if not re.search(r"(?:최대|수납|절약|내구성|스테인리스)", row["korean_text"]):
+        return []
+    own = fitz.Rect(row["x0"], row["y0"], row["x1"], row["y1"])
+    peers = []
+    for item in raw_lines:
+        value = item["text"].strip()
+        if not re.fullmatch(r"\d{1,4}(?:[,.]\d+)?\s*(?:%|배|년|위|cm|L)|\d{1,4}\s*/\s*\d{1,4}", value, re.I):
+            continue
+        box = fitz.Rect(item["bbox"])
+        if box.intersects(own):
+            continue
+        dy = max(0, box.y0-own.y1, own.y0-box.y1)
+        dx = max(0, box.x0-own.x1, own.x0-box.x1)
+        font = max(float(row["font_size"]), float(item["font_size"]), 1)
+        if (dy <= font*1.5 and dx <= font*8 and
+                abs(item["direction"][0]-row["dir_x"]) < .15 and
+                abs(item["direction"][1]-row["dir_y"]) < .15):
+            peers.append(item)
+    return sorted(peers, key=lambda e:
+                  abs(e["bbox"][0]-row["x0"])+abs(e["bbox"][1]-row["y0"]))
+
+
 def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
     rows, summaries = [], []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -250,8 +274,17 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
         for page_num, page in enumerate(doc, 1):
             page_rows = 0
             ocr_lines = 0
+            raw_lines = all_raw_lines(page)
+            previous_raw_by_block = {}
             for block_id, block in enumerate(page.get_text("rawdict", flags=0)["blocks"]):
                 for line_id, line in enumerate(block.get("lines", [])):
+                    evidence_id = f"p{page_num}:b{block_id}:l{line_id}"
+                    full_text = "".join(
+                        c["c"] for span in line.get("spans", [])
+                        for c in span.get("chars", [])
+                    )
+                    previous_text = previous_raw_by_block.get(block_id, "")
+                    previous_raw_by_block[block_id] = full_text
                     segment = korean_segment(line)
                     if not segment:
                         continue
@@ -275,7 +308,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     broken = "\ufffd" in native
                     candidate = ""
                     numeric_sensitive = bool(NUMERIC_CONTEXT.search(native) or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native))
-                    if (broken or mode == "all" or numeric_sensitive) and not curved:
+                    if (broken or mode == "all") and not curved:
                         candidate = tight_ocr(
                             page, line, chars, dpi,
                             numeric_context=numeric_sensitive,
