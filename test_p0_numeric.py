@@ -2,7 +2,7 @@
 import unittest
 from extractor import (
     numeric_tokens, numeric_evidence_disagrees, repair_damaged_native,
-    source_citation_prefix, korean_segment, numeric_peer_for
+    source_citation_prefix, merge_source_citation, korean_segment, numeric_peer_for
 )
 from layout import group_paragraphs
 
@@ -51,6 +51,29 @@ class NumericPipelineTests(unittest.TestCase):
         )
         self.assertEqual(partial, "Limited, Home and Garden 2026")
         self.assertTrue(warnings)
+
+    def test_source_year_overlap_appears_once(self):
+        source = "Euromonitor International Limited, Home and Garden 2026"
+        raw = "Limited, Home and Garden 2026 에디션, 판매 기준"
+        merged = merge_source_citation(source, "2026 에디션, 판매 기준", raw)
+        self.assertEqual(
+            merged, "Euromonitor International Limited, Home and Garden 2026 에디션, 판매 기준"
+        )
+        self.assertNotIn("2026 2026", merged)
+
+    def test_real_second_year_must_not_be_removed(self):
+        source = "Euromonitor International Limited, Home and Garden 2026"
+        raw = "Limited, Home and Garden 2026 2026 에디션, 판매 기준"
+        merged = merge_source_citation(source, "2026 에디션, 판매 기준", raw)
+        self.assertEqual(merged.count("2026"), 2)
+
+    def test_other_citation_years_not_hardcoded(self):
+        source = "Independent Market Report 2031"
+        raw = "Independent Market Report 2031 에디션 기준"
+        self.assertEqual(
+            merge_source_citation(source, "2031 에디션 기준", raw),
+            "Independent Market Report 2031 에디션 기준",
+        )
 
     def test_split_number_is_evidence_not_auto_insert(self):
         row = {
