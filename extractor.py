@@ -209,6 +209,32 @@ def source_citation_prefix(text, preceding=""):
     return "", []
 
 
+def merge_source_citation(citation, native, full_text):
+    """Reattach only observed citation characters without duplicating an overlap.
+
+    A native Korean segment can start at the source's final year ("2026
+    에디션"). That year is already included in the extracted English source.
+    Remove the *shared rendered token*, not a distinct second year. Only
+    collapse when the PDF's full native line contains a single copy at the
+    citation-to-Korean boundary.
+    """
+    if not citation or citation in native:
+        return native
+    tail = re.search(r"(\d{4})\s*$", citation)
+    if tail:
+        year = tail.group(1)
+        leading = re.match(r"^\s*" + re.escape(year) + r"(?=\s*에디션\b)", native)
+        if leading:
+            boundary = re.search(
+                re.escape(year) + r"\s*에디션\b", full_text
+            )
+            if boundary and len(re.findall(re.escape(year), full_text)) == 1:
+                # The year belongs to the citation and was also selected as
+                # a Korean prefix; it is one original token, not two.
+                native = native[leading.end():].lstrip()
+    return citation + " " + native
+
+
 def all_raw_lines(page, rawdict=None):
     """Lossless page-level evidence layer, independent of Korean filtering."""
     evidence = []
@@ -346,8 +372,8 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     citation, citation_warnings = source_citation_prefix(
                         full_text, previous_text
                     )
-                    if citation and KOR.search(native) and citation not in native:
-                        best = citation + " " + best
+                    if citation and KOR.search(native):
+                        best = merge_source_citation(citation, best, full_text)
                     warnings = []
                     if numeric_discrepancy:
                         warnings.append("수치 대조 필요 · 원본 확인")
