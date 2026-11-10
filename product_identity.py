@@ -7,6 +7,7 @@ as evidence but not approved without a reference text.
 import re
 from difflib import SequenceMatcher
 import fitz
+from product_parser import parse_product_pdf
 
 RANGES = {
     "EXPERTISE RUBY": r"EXPERTISE[\s_-]+RUBY",
@@ -115,111 +116,112 @@ def _check_product(expected_type, size_cm, observed):
     return "OK" if any(word in text for word in synonyms[expected_type]) else "FAIL"
 
 
-def check_product_identity(pdf_bytes, filename):
-    """Main QA: compare two independent regions IN the PDF.
+def _title_candidate(lines, reference, job_box):
+    """Locate the actual package range title, never a production ticket label.
 
-    Filename and PRODUIT are supplementary; neither can make front/GAMME
-    agreement pass or fail. Uncertain headline extraction is REVIEW.
+    When an internal job-sheet suffix (e.g. UNCOATED) is not on the front,
+    identify the printed shorter title but return REVIEW rather than OK.
+    """
+    normalized = normalize(reference)
+    if not normalized:
+        return None
+    rejected = re.compile(
+        r"^(?:NOM GAMME|GAMME|DESCRIPTION|PRODUIT|CLIENT|DOSSIER|"
+        r"ECHELLE|ÉCHELLE|CMMF|MADE IN|FABRIQU)", re.I
+    )
+    candidates = []
+    for line in lines:
+        value = normalize(line["text"])
+        if not value or rejected.match(line["text"]):
+            continue
+        if job_box and line["page"] == job_box["page"]:
+            coords = (line["x0"], line["y0"], line["x1"], line["y1"])
+            if (abs(coords[0] - job_box["bbox"][0]) < 5
+                    and abs(coords[1] - job_box["bbox"][1]) < 5):
+                continue
+        ratio = SequenceMatcher(None, normalized, value).ratio()
+        # A shortened front range title is evidence, not an exact match.
+        if ratio < .62 and not (len(value) >= 8 and
+                                (value in normalized or normalized in value)):
+            continue
+        if line["font_size"] < 7 or line["direction"][0] <= .5:
+            continue
+        is_exact = value == normalized
+        subset = len(value) >= 8 and value in normalized
+        candidates.append((
+            200 if is_exact else 100 if subset else 0,
+            ratio, line["font_size"], line
+        ))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (c[0], c[1], c[2]), reverse=True)
+    return candidates[0][3]
+
+
+def check_product_identity(pdf_bytes, filename):
+    """Cross-check printed front title against independent work-info metadata.
+
+    Use the same geometry-aware parsing as product metadata, not a global
+    'GAMME' regex that might match French legal disclaimers.
     """
     ref = filename_reference(filename)
+    metadata = parse_product_pdf(pdf_bytes, filename)
+    gamme = metadata.get("range_name") or ""
+    produit = metadata.get("product_type_raw") or ""
+    sheet_range_ev = (metadata.get("evidence", {}).get("range_name") or [None])[0]
+    sheet_prod_ev = (metadata.get("evidence", {}).get("product_type_raw") or [None])[0]
     results = []
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    try:
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         for page in doc:
             lines = visible_lines(page)
-            sheet_range = (_find_sheet_value(lines, "NOM GAMME") or _find_sheet_value(lines, "GAMME"))
-            sheet_product = (_find_sheet_value(lines, "DESCRIPTION") or _find_sheet_value(lines, "PRODUIT"))
-            gamme = sheet_range[0][1] if sheet_range else ""
-            produit = sheet_product[0][1] if sheet_product else ""
-
-            # G7 is an internal group/version prefix, not part of the
-            # range's printable brand name.
-            range_text = re.sub(r"^\s*G\s*\d+\s+", "", gamme, flags=re.I).strip()
-            expected = normalize(range_text)
-            candidates = [
-                item for item in lines
-                if expected and item["font_size"] >= 12
-                and item["direction"][0] > .8
-                and not re.match(
-                    r"^(?:NOM GAMME|GAMME|DESCRIPTION|PRODUIT|CLIENT|DOSSIER|ECHELLE|ÉCHELLE)\b",
-                    item["text"], re.I
-                )
-                and SequenceMatcher(None, expected, normalize(item["text"])).ratio() >= .72
-            ]
-            # Prefer the large, actual front-of-pack heading rather than
-            # incidental mentions in a different part of the dieline.
-            candidates.sort(key=lambda item: (
-                normalize(item["text"]) != expected,
-                -item["font_size"],
-                item["x0"],
-                item["y0"],
-            ))
-            title = candidates[0] if candidates else None
-
-            if not gamme or not title:
-                primary_status = "REVIEW"
-            elif normalize(title["text"]) == expected:
-                primary_status = "OK"
+            title = _title_candidate(lines, gamme, sheet_range_ev) if page.number == 0 else None
+            if not gamme or title is None:
+                primary = "REVIEW"
+            elif normalize(title["text"]) == normalize(gamme):
+                primary = "OK"
+            elif normalize(title["text"]) in normalize(gamme):
+                # e.g. job info ESSENTIAL START UNCOATED / printed ESSENTIAL START
+                primary = "REVIEW"
             else:
-                primary_status = "FAIL"
-
-            context = []
-            if title:
-                nearby = [
-                    item for item in lines if item is not title
-                    and abs(item["x0"] - title["x0"]) <= max(35, title["font_size"] * 3)
-                    and 0 < item["y0"] - title["y0"] <= max(70, title["font_size"] * 3)
-                    and item["direction"][0] > .8
-                    and item["font_size"] >= title["font_size"] * .7
-                ]
-                nearby.sort(key=lambda item: item["y0"])
-                context = [item["text"] for item in nearby[:2]]
-
-            produit_status = _check_product(ref["product"], ref["size_cm"], produit)
-            comparison = [
+                primary = "FAIL"
+            product_status = _check_product(ref["product"], ref["size_cm"], produit)
+            comparisons = [
                 ("패키지 전면 영문 제품명", title["text"] if title else "",
-                 primary_status, title, True),
-                ("작업정보 GAMME", gamme, primary_status,
-                 sheet_range[0][0] if sheet_range else None, True),
-                ("작업정보 PRODUIT (참고)", produit, produit_status,
-                 sheet_product[0][0] if sheet_product else None, False),
+                 primary, title, True, "패키지 전면 큰 제목"),
+                ("작업정보 GAMME", gamme, primary, sheet_range_ev, True, "작업정보 GAMME"),
+                ("작업정보 PRODUIT (참고)", produit, product_status,
+                 sheet_prod_ev, False, "작업정보 PRODUIT"),
             ]
-            for field, actual, status, position, is_primary in comparison:
-                filename_hint = (
-                    ref["range"] if "PRODUIT" not in field else
-                    f'{ref["product"]} {ref["size_cm"]} cm'
-                    if ref["product"] and ref["size_cm"] else ""
-                )
+            for field, actual, status, evidence, is_primary, location in comparisons:
+                if is_primary and status == "REVIEW" and gamme and title:
+                    note = "전면 표기와 제작정보 간 수식어/철자 차이: 승인된 표기 기준 확인 필요"
+                elif is_primary:
+                    note = "PDF 전면과 작업정보의 직접 대조; 파일명은 판정에서 제외"
+                else:
+                    note = "파일명은 참고용이며 주 판정에 미반영"
+                if evidence and "bbox" in evidence:
+                    x0, y0, x1, y1 = evidence["bbox"]
+                elif evidence:
+                    x0, y0, x1, y1 = (
+                        evidence["x0"], evidence["y0"],
+                        evidence["x1"], evidence["y1"]
+                    )
+                else:
+                    x0 = y0 = x1 = y1 = None
                 results.append({
-                    "file": filename,
-                    "page": page.number + 1,
-                    "check": field,
-                    "expected_from_filename": filename_hint or "파일명 기준 없음",
+                    "file": filename, "page": page.number + 1,
+                    "check": field, "expected_from_filename": (
+                        ref["range"] or "파일명 기준 없음"),
                     "comparison_reference": (
-                        range_text if "패키지 전면" in field else
-                        title["text"] if "GAMME" in field and title else
-                        filename_hint
-                    ) or "확인 필요",
-                    "extracted": actual or "미검출",
-                    "status": status,
-                    "is_primary": is_primary,
-                    "context": " / ".join(context) if "패키지 전면" in field else "",
-                    "note": (
-                        "주변 광고 문구는 추출만 하며 승인 문구와의 일치 여부는 미판정"
-                        if "패키지 전면" in field else
-                        "제품 종류·규격은 파일명과 참고 비교, 종합 판정에는 미반영"
-                        if "PRODUIT" in field else
-                        "GAMME에서 G7 등의 내부 코드 제외 후 전면 제목과 비교"
+                        gamme if "패키지 전면" in field else
+                        (title["text"] if title else "확인 필요")
+                        if "GAMME" in field else
+                        (f'{ref["product"]} {ref["size_cm"]} cm'
+                         if ref["product"] and ref["size_cm"] else "파일명 기준 없음")
                     ),
-                    "x0": position["x0"] if position else None,
-                    "y0": position["y0"] if position else None,
-                    "x1": position["x1"] if position else None,
-                    "y1": position["y1"] if position else None,
-                    "location": (
-                        "패키지 전면 큰 제목" if "패키지 전면" in field
-                        else "우측 작업정보 " + ("PRODUIT" if "PRODUIT" in field else "GAMME")
-                    ),
+                    "extracted": actual or "미검출", "status": status,
+                    "is_primary": is_primary, "context": "", "note": note,
+                    "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                    "location": location,
                 })
-    finally:
-        doc.close()
     return results
