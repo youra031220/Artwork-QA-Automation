@@ -209,10 +209,12 @@ def source_citation_prefix(text, preceding=""):
     return "", []
 
 
-def all_raw_lines(page):
+def all_raw_lines(page, rawdict=None):
     """Lossless page-level evidence layer, independent of Korean filtering."""
     evidence = []
-    for block_id, block in enumerate(page.get_text("rawdict", flags=0)["blocks"]):
+    if rawdict is None:
+        rawdict = page.get_text("rawdict", flags=0)
+    for block_id, block in enumerate(rawdict["blocks"]):
         for line_id, line in enumerate(block.get("lines", [])):
             spans = line.get("spans", [])
             if not spans:
@@ -283,9 +285,10 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
         for page_num, page in enumerate(doc, 1):
             page_rows = 0
             ocr_lines = 0
-            raw_lines = all_raw_lines(page)
+            rawdict = page.get_text("rawdict", flags=0)
+            raw_lines = all_raw_lines(page, rawdict=rawdict)
             previous_raw_by_block = {}
-            for block_id, block in enumerate(page.get_text("rawdict", flags=0)["blocks"]):
+            for block_id, block in enumerate(rawdict["blocks"]):
                 for line_id, line in enumerate(block.get("lines", [])):
                     evidence_id = f"p{page_num}:b{block_id}:l{line_id}"
                     full_text = "".join(
