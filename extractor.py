@@ -180,8 +180,9 @@ def numeric_evidence_disagrees(native, ocr):
     native_tokens = numeric_tokens(native)
     ocr_tokens = numeric_tokens(ocr)
     if not ocr_tokens:
-        # The OCR might have lost the number entirely; leave native unchanged.
-        return False
+        # An OCR candidate like "409" instead of "40%" has a visible
+        # number but no unit: flag it, do not silently accept or replace.
+        return bool(native_tokens and re.search(r"(?<!\\d)\\d{1,4}(?!\\d)", ocr))
     # Never treat an OCR-only token as authoritatively correct.
     return native_tokens != ocr_tokens
 
