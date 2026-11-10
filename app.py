@@ -283,7 +283,14 @@ if st.session_state.get("qa_result"):
                         ), None)
                         if related and related.get("warnings"):
                             st.write("검토 사유:", related["warnings"])
+                            st.info("읽기용 OCR 후보입니다. 승인된 원문이 아니므로 PDF와 대조하세요.")
                             st.write("OCR 후보:", related.get("ocr_candidates", []))
+                    if picked["source"] == "원본 줄" and picked.get("line_index") is not None:
+                        original_line = rows[picked["line_index"]]
+                        if original_line.get("ocr_candidate"):
+                            st.info("읽기용 OCR 후보 (원본을 대체하지 않음):")
+                            st.write(original_line["ocr_candidate"])
+                            st.caption("PDF 원문과 후보가 다르면 사람이 원본을 확인해야 합니다.")
                     st.caption(f"표시 박스: {sum(len(b['rects']) for b in boxes)}개")
                 else:
                     item_index = None
