@@ -34,7 +34,7 @@ def _korean_scope_end(text, hangul_position):
         if foreign.start() < protected_until:
             continue
         source = INLINE_SOURCE.match(text, foreign.start())
-        if source and KOR.search(text[source.end():source.end() + 40]):
+        if source:
             protected_until = source.end()
             continue
         return foreign.start()
@@ -51,6 +51,14 @@ def korean_segment(line):
     start = match.start()
     if start and text[start - 1] == "\ufffd":
         start -= 1
+    # Keep numeric prefixes of Korean copy, e.g. "18/10 스테인리스".
+    preceding = text[:match.start()]
+    numeric_prefix = re.search(
+        r"(?:^|\\s)(\\d{1,4}(?:\\s*/\\s*\\d{1,4})?|\\d{1,4}(?:[,.]\\d+)?\\s*%)\\s*$",
+        preceding
+    )
+    if numeric_prefix:
+        start = min(start, numeric_prefix.start(1))
     # Retain the initial QR/AI prefix when it belongs to Korean wording.
     prefix = text[max(0, start - 3):start]
     leading = re.search(r"(?:QR|AI)\s*$", prefix)
@@ -64,10 +72,10 @@ def korean_segment(line):
     return chars[start:end], re.sub(r"\s+", " ", text[start:end]).strip()
 
 
-def tight_ocr(page, line, chars, dpi):
+def tight_ocr(page, line, chars, dpi, numeric_context=False):
     direction = line.get("dir", (1, 0))
     boxes = [c["bbox"] for c in chars]
-    x0 = min(b[0] for b in boxes) - 2
+    x0 = min(b[0] for b in boxes) - (min(95, line["spans"][0]["size"] * 12) if numeric_context else 2)
     x1 = max(b[2] for b in boxes) + 2
     first_span = line["spans"][0]
     baseline = first_span["origin"][1]
@@ -108,7 +116,13 @@ def tight_ocr(page, line, chars, dpi):
     number = re.search(r"\d\s*$", result[:start])
     if number:
         start = number.start()
-    prefix = re.search(r"(?:QR|AI)\s*$", result[max(0, start - 3):start])
+    numeric_lead = re.search(
+        r"(?:^|\\s)(\\d{1,4}(?:\\s*/\\s*\\d{1,4})?|\\d{1,4}(?:[,.]\\d+)?\\s*%)\\s*$",
+        result[:match.start()]
+    )
+    if numeric_lead:
+        start = numeric_lead.start(1)
+    prefix = re.search(r"(?:QR|AI)\\s*$", result[max(0, start - 3):start])
     if prefix:
         start -= len(prefix.group())
     end = _korean_scope_end(result, match.start())
