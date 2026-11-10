@@ -15,9 +15,29 @@ python -m streamlit run app.py
 
 4. 브라우저에서 PDF 여러 개를 업로드하고 OCR 범위를 선택합니다. 추출을 마치면 CSV·JSON·TXT 결과 ZIP을 다운로드할 수 있습니다.
 
+## P0 · 승인 문구 구조화와 제품정보 범용화
+
+P0 기능은 기존 한국어/OCR 추출과 별개로 실행합니다. 로컬 Streamlit에서 사내 검수 기준 Excel을 직접 업로드하면 \`excel_loader.py\`가 원본 파일을 바꾸지 않고 \`phrases\`, \`rules\`, \`variants\`, \`validation_issues\`를 생성합니다. 업로드 데이터는 공개 저장소에 포함하지 않습니다.
+
+- Excel 규칙은 행 단위 문구와 조건 단위 그룹을 구별합니다. 특히 '품질 보증 / 사용법' 카테고리 안의 선택 1개·전체 필수 등 서로 다른 조건을 개별 Rule로 보관합니다.
+- 문구 승인 여부는 \`UNVERIFIED\`로 표시합니다. 빈 값, 중복 EN–KO 쌍, 동일 EN 복수 번역, 조건/Remark 모호성을 검토 이슈로 보존합니다.
+- \`product_parser.py\`가 \`GAMME / PRODUIT\`와 \`NOM GAMME / DESCRIPTION\` 제작사 양식을 지원합니다. 레인지, CMMF, DOSSIER, 유형, 크기, 용량, 뚜껑, 제조국 선언, 열원, 재질을 추출하고 원문·페이지·좌표를 함께 보관합니다.
+- 제조국은 \`MADE IN\` 같은 제조국 선언으로 판단하며 프랑스 본사 주소를 프랑스 제조 증거로 취급하지 않습니다. \`+ CV\`는 뚜껑 유무만 확정하고 유리 소재 여부는 확정하지 않습니다.
+- 제품정보 표와 상세 원문 좌표를 화면에서 확인하고 CSV/JSON으로 내보낼 수 있습니다.
+- P0는 **최종 아트웍 승인 판정이 아닙니다.** 로고·QR·문구별 합부 판정은 후속 단계입니다.
+
+### 비공개 자료 테스트
+
+실제 회사 PDF/Excel은 로컬에서만 테스트하세요. 저장소의 \`test_p0.py\`와 GitHub Actions 워크플로는 가상 문구·가상 식별정보로만 테스트합니다.
+
+\`\`\`powershell
+python -m unittest -v test_p0
+python -m py_compile app.py extractor.py layout.py product_identity.py pdf_overlay.py excel_loader.py product_parser.py
+\`\`\`
+
 ## 제품명 교차 검수
 
-- **주 판정:** PDF 패키지 전면의 큰 제품명과 PDF 작업정보 `GAMME`의 제품명을 비교합니다. 내부 접두어 `G7` 등은 제거합니다.
+- **주 판정:** PDF 패키지 전면의 큰 제품명과 PDF 작업정보 `GAMME` 또는 `NOM GAMME`의 제품명을 비교합니다. 내부 접두어 `G7` 등은 제거합니다.
 - 대소문자·구분 기호를 무시한 제품명 철자 일치 시 `OK`, 확실히 다른 철자는 `FAIL`, 위치를 찾지 못하면 `REVIEW`입니다.
 - 파일명과 `PRODUIT`의 제품 유형·크기 비교는 참고 정보이며 주 판정에 반영하지 않습니다.
 - 모든 추출 항목에 원본 페이지·좌표를 기록하고 PDF 영역 미리보기를 제공합니다.
