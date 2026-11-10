@@ -240,6 +240,9 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         numeric_sensitive and (
                             (ocr_numbers and ocr_numbers != source_numbers)
                             or (not source_numbers and candidate)
+                            or (not source_numbers and re.search(
+                                r"최대.{0,18}(?:수납|공간|절약)|매출.{0,22}기준", native
+                            ))
                             or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native)
                         )
                     )
