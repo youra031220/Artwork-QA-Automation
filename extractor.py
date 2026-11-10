@@ -325,18 +325,26 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         status = "곡선 배치 · 연결 확인" if curved else "원본 추출 정상"
                     source_numbers = numeric_tokens(native)
                     ocr_numbers = numeric_tokens(candidate)
+                    explicit_damage = bool(re.search(
+                        r"\ufffd{1,6}\s*(?:%|/\s*\ufffd)", native
+                    ))
                     numeric_discrepancy = bool(
-                        numeric_sensitive and (
-                            (ocr_numbers and ocr_numbers != source_numbers)
-                            or (not source_numbers and candidate)
-                            or (not source_numbers and re.search(
-                                r"최대.{0,18}(?:수납|공간|절약)|매출.{0,22}기준", native
-                            ))
-                            or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native)
-                        )
+                        explicit_damage or numeric_evidence_disagrees(native, candidate)
                     )
+                    citation, citation_warnings = source_citation_prefix(
+                        full_text, previous_text
+                    )
+                    if citation and KOR.search(native) and citation not in native:
+                        best = citation + " " + best
+                    warnings = []
                     if numeric_discrepancy:
+                        warnings.append("수치 대조 필요 · 원본 확인")
                         status = "수치 대조 필요 · 원본 확인"
+                    elif broken:
+                        warnings.append("손상된 글자 · OCR 원본 대조 필요")
+                    warnings.extend(citation_warnings)
+                    if citation_warnings and not numeric_discrepancy:
+                        status = "영문 출처 대조 필요 · 원본 확인"
                     rows.append({
                         "file": filename,
                         "page": page_num,
@@ -355,15 +363,29 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         "numeric_review": numeric_discrepancy,
                         "native_numeric_tokens": sorted(source_numbers),
                         "ocr_numeric_tokens": sorted(ocr_numbers),
+                        "warnings": warnings,
+                        "raw_evidence_ids": [evidence_id],
+                        "source_citation": citation,
                         "x0": round(min(c["bbox"][0] for c in chars), 1),
                         "y0": round(min(c["bbox"][1] for c in chars), 1),
                         "x1": round(max(c["bbox"][2] for c in chars), 1),
                         "y1": round(max(c["bbox"][3] for c in chars), 1),
                     })
+                    current = rows[-1]
+                    peers = numeric_peer_for(current, raw_lines)
+                    current["numeric_peer_evidence"] = [
+                        {"id": e["id"], "text": e["text"], "bbox": e["bbox"]}
+                        for e in peers[:5]
+                    ]
+                    if peers and not numeric_tokens(current["korean_text"]):
+                        current["numeric_review"] = True
+                        current["warnings"].append("수치 대조 필요 · 숫자 객체 연결 확인")
+                        current["status"] = "수치 대조 필요 · 숫자 객체 연결 확인"
                     page_rows += 1
             summaries.append({
                 "file": filename, "page": page_num,
                 "korean_lines": page_rows, "ocr_lines": ocr_lines,
+                "raw_evidence": raw_lines,
             })
     finally:
         doc.close()
