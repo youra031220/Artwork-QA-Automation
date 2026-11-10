@@ -38,7 +38,15 @@ def _should_join_lines(previous, current):
     b = float(current.get("font_size", 0))
     if a and b and abs(a - b) / max(a, b) > .18:
         return False
-    if abs(float(previous["x0"]) - float(current["x0"])) > max(12, max(a, b, 1) * 2.5):
+    # A numeric claim can wrap at the right edge of the same text block.
+    # Allow only a preceding "최대" and a following damaged/visible percentage;
+    # do not generally join distant columns.
+    wraps_numeric_claim = bool(
+        re.search(r"최대\s*$", previous["korean_text"])
+        and re.match(r"^(?:\ufffd{1,6}|\d{1,3})\s*%\s*", current["korean_text"])
+    )
+    if (not wraps_numeric_claim and
+            abs(float(previous["x0"]) - float(current["x0"])) > max(12, max(a, b, 1) * 2.5)):
         return False
     baseline_a = float(previous.get("baseline_y", previous["y0"]))
     baseline_b = float(current.get("baseline_y", current["y0"]))
