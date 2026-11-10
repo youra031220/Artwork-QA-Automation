@@ -244,7 +244,8 @@ if st.session_state.get("qa_result"):
                 show_all = st.checkbox("전체 박스 표시", value=True, key="overlay_all")
                 boxes = collect_boxes(
                     rows, grouped, identity_checks, view_file, view_page,
-                    group_view=display_mode == "문단별"
+                    group_view=display_mode == "문단별",
+                    raw_summaries=summaries,
                 )
                 kinds = list(COLORS)
                 selected_kinds = st.multiselect(
@@ -262,7 +263,7 @@ if st.session_state.get("qa_result"):
                         "추출 항목 선택",
                         range(len(boxes)),
                         format_func=lambda i: (
-                            f"{i + 1}. [{boxes[i]['kind']}] "
+                            f"{i + 1}. [{'수치 대조 필요' if '수치' in boxes[i]['status'] else boxes[i]['kind']}] "
                             f"{boxes[i]['label'][:75]}"
                         ),
                         key="overlay_item"
