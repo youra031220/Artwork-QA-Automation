@@ -177,6 +177,36 @@ def group_paragraphs(rows):
                 if any("확인" in row["status"] or "후보" in row["status"] for _, row in group)
                 else "원본 추출 정상"
             )
+        # Keep the most severe original warning; never silently downgrade a
+        # numerical ambiguity to a generic OCR flag in paragraph or ZIP views.
+        warnings = list(dict.fromkeys(
+            warning
+            for _, row in group
+            for warning in (row.get("warnings") or [])
+        ))
+        if any(row.get("numeric_review") for _, row in group):
+            status = "수치 대조 필요 · 원본 확인"
+            if not any("수치" in warning for warning in warnings):
+                warnings.insert(0, status)
+        elif warnings:
+            status = warnings[0]
+        evidence_ids = list(dict.fromkeys(
+            ident for _, row in group
+            for ident in row.get("raw_evidence_ids", [])
+        ))
+        numeric = sorted(set(
+            token for _, row in group
+            for token in row.get("native_numeric_tokens", [])
+        ))
+        candidates = [
+            {"text": row["ocr_candidate"], "line_index": index}
+            for index, row in group if row.get("ocr_candidate")
+        ]
+        positions = [
+            {"line_index": index, "page": row["page"],
+             "bbox": [row["x0"], row["y0"], row["x1"], row["y1"]]}
+            for index, row in group
+        ]
         output.append({
             "file": group[0][1]["file"],
             "page": group[0][1]["page"],
@@ -185,5 +215,11 @@ def group_paragraphs(rows):
             "line_count": len(group),
             "line_indices": [index for index, _ in group],
             "status": status,
+            "warnings": warnings,
+            "numeric_review": any(row.get("numeric_review") for _, row in group),
+            "raw_evidence_ids": evidence_ids,
+            "numeric_tokens": numeric,
+            "ocr_candidates": candidates,
+            "source_coordinates": positions,
         })
     return output
