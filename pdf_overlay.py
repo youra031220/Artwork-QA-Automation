@@ -292,10 +292,17 @@ def render_selected_crop(pdf_bytes, page_number, item, margin=24, numeric_contex
             or (("수치" in status or item.get("display_label", "").startswith("수치"))
                 and bounds.width < 95)
         )
-        if needs_context:
+        if needs_context and not item.get("context_candidates"):
+            # No independently linked PDF glyphs: show generous neighboring
+            # context so an unindexed number remains visible.
             context = max(100.0, min(float(numeric_context), 420.0))
             margin_x = max(margin_x, context)
             margin_y = max(margin_y, min(120.0, context * .42))
+        elif item.get("context_candidates"):
+            # All neighboring glyph boxes are already part of bounds; keep
+            # the crop tight so the percentage is actually large and readable.
+            margin_x = max(24.0, min(45.0, bounds.width * .22))
+            margin_y = max(16.0, min(35.0, bounds.height * .40))
         crop = fitz.Rect(bounds.x0 - margin_x, bounds.y0 - margin_y,
                          bounds.x1 + margin_x, bounds.y1 + margin_y) & page.rect
         if crop.is_empty:
