@@ -137,6 +137,19 @@ def _variables(english, korean, remark):
     return variables
 
 
+def _applicability(remark):
+    """Parse only deterministic constraints; keep other prose for human review."""
+    text = re.sub(r"\s+", "", remark)
+    if "유리뚜껑" in text:
+        if "없을경우" in text or "미포함" in text:
+            return "lid_material != glass"
+        if "있을경우" in text or "포함" in text:
+            return "lid_material == glass"
+    if "18cm" in text and "뚝배기" in text:
+        return "size_cm == 18"
+    return "REQUIRES_REVIEW" if remark else ""
+
+
 def parse_reference_excel(upload):
     """Build phrase/rule/variant/issue tables from source Excel without inventing approvals."""
     sheets = _read_xlsx(upload)
@@ -199,7 +212,7 @@ def parse_reference_excel(upload):
         )))
         variants.append(asdict(Variant(
             "V" + str(row_num), active_rule, key, english, korean,
-            _variables(english, korean, remark), "REFER_TO_REMARK" if remark else "",
+            _variables(english, korean, remark), _applicability(remark),
             remark
         )))
         if not english or not korean:
