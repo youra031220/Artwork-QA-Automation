@@ -1,6 +1,7 @@
 """Privacy-safe tests for native PDF evidence highlights and numeric status."""
 import unittest
-from pdf_overlay import _citation_rects, collect_boxes
+import fitz
+from pdf_overlay import _citation_rects, collect_boxes, render_selected_crop
 
 
 def evidence(text, key, x, y):
@@ -61,6 +62,40 @@ class SourceOverlayTests(unittest.TestCase):
         expected_x = 25 + (len(dutch) + len(korean)) * 5
         self.assertTrue(any(abs(box[0] - expected_x) < 1 for box in boxes), boxes)
         self.assertFalse(any(box[0] == 25 for box in boxes))
+
+    def test_selected_crop_includes_multiple_lines_and_is_enlarged(self):
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=800)
+        page.insert_text((100, 220), "FIRST LINE", fontsize=12)
+        page.insert_text((115, 240), "SECOND LINE", fontsize=12)
+        left = list(page.search_for("FIRST LINE")[0])
+        right = list(page.search_for("SECOND LINE")[0])
+        data = doc.tobytes()
+        doc.close()
+        crop = render_selected_crop(data, 1, {"rects": [left, right]})
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop.width, 200)
+        self.assertGreater(crop.height, 60)
+        self.assertLess(crop.width, 900)
+
+    def test_selected_crop_empty_rectangles_return_none(self):
+        doc = fitz.open()
+        doc.new_page(width=300, height=300)
+        data = doc.tobytes()
+        doc.close()
+        self.assertIsNone(render_selected_crop(data, 1, {"rects": []}))
+
+    def test_selected_crop_near_edge_stays_in_bounds(self):
+        doc = fitz.open()
+        page = doc.new_page(width=240, height=140)
+        page.insert_text((5, 14), "EDGE", fontsize=10)
+        rect = list(page.search_for("EDGE")[0])
+        data = doc.tobytes()
+        doc.close()
+        crop = render_selected_crop(data, 1, {"rects": [rect]})
+        self.assertIsNotNone(crop)
+        self.assertGreater(crop.width, 0)
+        self.assertGreater(crop.height, 0)
 
     def test_numeric_review_has_own_kind_in_list(self):
         row = {"file": "synthetic.pdf", "page": 1, "korean_text": "최대 ��% 수납",
