@@ -54,7 +54,7 @@ def korean_segment(line):
     # Keep numeric prefixes of Korean copy, e.g. "18/10 스테인리스".
     preceding = text[:match.start()]
     numeric_prefix = re.search(
-        r"(?:^|\\s)(\\d{1,4}(?:\\s*/\\s*\\d{1,4})?|\\d{1,4}(?:[,.]\\d+)?\\s*%)\\s*$",
+        r"(?:^|\s)(\d{1,4}(?:\s*/\s*\d{1,4})?|\d{1,4}(?:[,.]\d+)?\s*%)\s*$",
         preceding
     )
     if numeric_prefix:
@@ -117,12 +117,12 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
     if number:
         start = number.start()
     numeric_lead = re.search(
-        r"(?:^|\\s)(\\d{1,4}(?:\\s*/\\s*\\d{1,4})?|\\d{1,4}(?:[,.]\\d+)?\\s*%)\\s*$",
+        r"(?:^|\s)(\d{1,4}(?:\s*/\s*\d{1,4})?|\d{1,4}(?:[,.]\d+)?\s*%)\s*$",
         result[:match.start()]
     )
     if numeric_lead:
         start = numeric_lead.start(1)
-    prefix = re.search(r"(?:QR|AI)\\s*$", result[max(0, start - 3):start])
+    prefix = re.search(r"(?:QR|AI)\s*$", result[max(0, start - 3):start])
     if prefix:
         start -= len(prefix.group())
     end = _korean_scope_end(result, match.start())
