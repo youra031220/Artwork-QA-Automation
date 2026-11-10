@@ -16,6 +16,41 @@ st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출",
 st.title("아트웍 검수 자동화")
 st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
+reference_xlsx = st.file_uploader("P0 · 검수 기준 Excel 업로드", type=["xlsx"], key="rules_xlsx")
+if reference_xlsx is not None:
+    try:
+        @st.cache_data(show_spinner=False)
+        def load_p0_master(content):
+            return parse_reference_excel(content)
+        master = load_p0_master(reference_xlsx.getvalue())
+        st.subheader("P0 · Excel 기준 데이터")
+        a, b, c, d = st.columns(4)
+        a.metric("문구 수", len(master["phrases"]))
+        b.metric("카테고리", len(set(p["category_id"] for p in master["phrases"])))
+        c.metric("규칙 그룹", len(master["rules"]))
+        d.metric("검토 이슈", len(master["validation_issues"]))
+        with st.expander("문구·규칙·변수·데이터 이슈", expanded=False):
+            st.write("**Rule Master**")
+            st.dataframe(pd.DataFrame(master["rules"]), use_container_width=True, hide_index=True)
+            st.write("**Phrase Master**")
+            categories = sorted(set(p["category_id"] for p in master["phrases"]))
+            selected_category = st.selectbox("TYPE 필터", ["전체"] + categories, key="p0_type")
+            phrases = [p for p in master["phrases"] if selected_category == "전체"
+                       or p["category_id"] == selected_category]
+            st.dataframe(pd.DataFrame(phrases), use_container_width=True, hide_index=True)
+            st.write("**Variant Master**")
+            st.dataframe(pd.DataFrame(master["variants"]), use_container_width=True, hide_index=True)
+            st.write("**검토가 필요한 데이터**")
+            st.dataframe(pd.DataFrame(master["validation_issues"]),
+                         use_container_width=True, hide_index=True)
+        st.download_button(
+            "P0 구조화 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
+            file_name="artwork_rules_p0.json", mime="application/json"
+        )
+        st.caption("Excel 원본은 수정하지 않으며 승인 상태는 확인 전입니다.")
+    except Exception as exc:
+        st.error("Excel 해석 실패: " + str(exc))
+
 col1, col2 = st.columns(2)
 with col1:
     dpi = st.select_slider("OCR 해상도", options=[200, 300, 350, 400], value=350)
