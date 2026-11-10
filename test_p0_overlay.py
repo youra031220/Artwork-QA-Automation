@@ -155,6 +155,37 @@ class SourceOverlayTests(unittest.TestCase):
         self.assertEqual(boxes[0]["label"], row["korean_text"])
         self.assertEqual(boxes[0]["status"], "원본 추출 정상")
 
+    def test_isolated_maximum_includes_pdf_number_and_benefit_boxes(self):
+        row = {
+            "file": "synthetic.pdf", "page": 1, "korean_text": "최대",
+            "status": "문장 연결 확인 필요 · 숫자 객체 연결 미확정",
+            "numeric_review": True,
+            "x0": 1456, "y0": 848, "x1": 1476, "y1": 860,
+            "curved": False, "raw_evidence_ids": [],
+        }
+        number = evidence("40%", "p1:b38:l1", 1480, 817)
+        number["bbox"] = [1480, 817, 1539, 873]
+        phrase = evidence("수납 공간 절약", "p1:b37:l0", 1427, 861)
+        phrase["bbox"] = [1427, 861, 1540, 893]
+        unrelated = evidence("40%", "p1:b32:l0", 820, 788)
+        unrelated["bbox"] = [820, 788, 898, 844]
+        summaries = [{"file": "synthetic.pdf", "page": 1,
+                      "raw_evidence": [number, phrase, unrelated]}]
+        group = {
+            "file": "synthetic.pdf", "page": 1,
+            "line_indices": [0], "type": "문장 연결 확인",
+            "paragraph": "최대 [뒤따르는 수치·문구 연결 확인 필요]",
+            "status": row["status"], "numeric_review": True
+        }
+        boxes = collect_boxes([row], [group], [], "synthetic.pdf", 1,
+                              group_view=True, raw_summaries=summaries)
+        selected = boxes[0]
+        self.assertEqual(selected["context_candidates"], ["40%", "수납 공간 절약"])
+        self.assertEqual(selected["original_label"], group["paragraph"])
+        self.assertIn("40% / 수납 공간 절약", selected["label"])
+        self.assertEqual(len(selected["rects"]), 3)
+        self.assertFalse(any(rect[0] == 820 for rect in selected["rects"]))
+
     def test_numeric_review_has_own_kind_in_list(self):
         row = {"file": "synthetic.pdf", "page": 1, "korean_text": "최대 ��% 수납",
                "status": "수치 대조 필요 · 원본 확인", "x0": 0, "y0": 0,
