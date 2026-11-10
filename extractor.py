@@ -218,7 +218,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                     curved = abs(direction[1]) > .3
                     broken = "\ufffd" in native
                     candidate = ""
-                    numeric_sensitive = bool(NUMERIC_CONTEXT.search(native))
+                    numeric_sensitive = bool(NUMERIC_CONTEXT.search(native) or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native))
                     if (broken or mode == "all" or numeric_sensitive) and not curved:
                         candidate = tight_ocr(
                             page, line, chars, dpi,
@@ -240,6 +240,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
                         numeric_sensitive and (
                             (ocr_numbers and ocr_numbers != source_numbers)
                             or (not source_numbers and candidate)
+                            or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native)
                         )
                     )
                     if numeric_discrepancy:
