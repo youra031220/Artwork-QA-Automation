@@ -70,6 +70,36 @@ class NumericPipelineTests(unittest.TestCase):
         )
         self.assertEqual(row["korean_text"], "최대 수납 공간 절약")
 
+    def test_damaged_number_prefix_is_never_silently_dropped(self):
+        for text, prefix in [
+            ("��% 수납 공간 절약", "��%"),
+            ("��/�� 스테인리스 스틸", "��/��"),
+        ]:
+            value = korean_segment(fake_line(text))
+            self.assertIsNotNone(value)
+            self.assertTrue(value[1].startswith(prefix), value[1])
+
+    def test_wrapped_percent_claim_keeps_review(self):
+        common = {
+            "file": "sample.pdf", "page": 1, "block_id": 4,
+            "curved": False, "dir_x": 1, "dir_y": 0,
+            "font_size": 10, "y0": 100, "y1": 112,
+            "status": "원본 추출 정상", "warnings": [],
+            "numeric_review": False, "ocr_candidate": "",
+            "native_numeric_tokens": [], "raw_evidence_ids": [],
+        }
+        left = dict(common, korean_text="최대", x0=500, x1=530,
+                    line_id=0, baseline_y=110)
+        right = dict(common, korean_text="��% 수납", x0=100, x1=165,
+                     y0=112, y1=124, line_id=1, baseline_y=122,
+                     status="수치 대조 필요 · 원본 확인",
+                     warnings=["수치 대조 필요 · 원본 확인"],
+                     numeric_review=True)
+        joined = group_paragraphs([left, right])
+        self.assertEqual(len(joined), 1)
+        self.assertIn("최대 ��% 수납", joined[0]["paragraph"])
+        self.assertTrue(joined[0]["numeric_review"])
+
     def test_numeric_warning_reaches_paragraph_json(self):
         row = {
             "file": "sample.pdf", "page": 1, "curved": False,
