@@ -263,7 +263,7 @@ if st.session_state.get("qa_result"):
                 return view.reindex(columns=list(columns)).rename(columns=columns)
 
             with tab_matches:
-                st.caption("추출 문구·기준 문구·차이점 중심으로 표시합니다. ID 및 좌표 등은 아래 '근거·상세정보'에서 확인할 수 있습니다.")
+                st.caption("실제 PDF 문구와 기준 문구를 비교합니다. 상세 좌표와 원본 파일명은 '근거·상세정보'에서 확인할 수 있습니다.")
                 st.dataframe(
                     reviewer_table(p1_matches, match_columns),
                     use_container_width=True, hide_index=True,
@@ -303,11 +303,12 @@ if st.session_state.get("qa_result"):
                     pick = st.selectbox(
                         "상세 확인할 문구", range(len(p1_matches)),
                         format_func=lambda j: (
-                            f'{p1_matches[j]["file"]} · p.{p1_matches[j]["page"]}'
+                            f'{shown_file(p1_matches[j]["file"])} · p.{p1_matches[j]["page"]}'
                             f' · {p1_matches[j]["status"]} · {p1_matches[j]["extracted"][:65]}'
                         ), key="p1_evidence_item"
                     )
                     entry = p1_matches[pick]
+                    st.caption("원본 파일명: " + entry["file"])
                     st.write("**PDF 추출 문구:**", entry["extracted"])
                     st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
                     st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
@@ -358,7 +359,7 @@ if st.session_state.get("qa_result"):
                 key="p1_download",
             )
         except Exception as p1_exc:
-            st.error("P1 검수 오류 (기존 P0 추출은 계속 사용 가능): " + str(p1_exc))
+            st.error("기준 문구 검수 중 오류가 발생했습니다. 추출 문구는 아래에서 확인할 수 있습니다: " + str(p1_exc))
 
         st.subheader("PDF에서 찾은 전체 문구")
         st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
@@ -378,7 +379,7 @@ if st.session_state.get("qa_result"):
             [r["file"] for r in rows] + [r["file"] for r in identity_checks]
         ))
         if view_files:
-            view_file = st.selectbox("파일 선택", view_files, key="overlay_file")
+            view_file = st.selectbox("제품 선택", view_files, format_func=shown_file, key="overlay_file")
             view_pages = sorted(set(
                 [int(r["page"]) for r in rows if r["file"] == view_file] +
                 [int(r["page"]) for r in identity_checks if r["file"] == view_file]
@@ -478,7 +479,7 @@ if st.session_state.get("qa_result"):
                     )
                     st.image(
                         image,
-                        caption=f"{view_file} · {view_page}페이지 (박스는 실제 PDF 텍스트 좌표 기준)",
+                        caption=f"{shown_file(view_file)} · {view_page}페이지 (원본 PDF 근거 위치)",
                         use_container_width=True
                     )
                     st.caption("PDF 전체 페이지를 표시합니다. 선택된 항목은 노란색으로 강조됩니다.")
