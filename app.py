@@ -228,7 +228,14 @@ if st.session_state.get("qa_result"):
             p1_rules = [
                 result
                 for filename in all_files
-                for result in evaluate_rules(p1_matches, p1_master, filename)
+                for result in evaluate_rules(
+                    p1_matches, p1_master, filename,
+                    context={"raw_pdf_text": " ".join(
+                        evidence.get("text", "")
+                        for page in summaries if page.get("file") == filename
+                        for evidence in page.get("raw_evidence", [])
+                    )},
+                )
             ]
             p1_rules.extend(evaluate_conditions(product_metadata, p1_matches, summaries))
             for filename in all_files:
