@@ -10,6 +10,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
+from ui_labels import product_title, product_labels, display_file_table
 from embedded_reference import load_master
 
 
@@ -43,6 +44,32 @@ def group(text,page=1,damage=False):
     return dict(file="example.pdf",page=page,paragraph=text,numeric_review=damage,
                 line_indices=[0],source_coordinates=[
                     dict(bbox=[10,10,90,25],page=page,line_index=0)])
+
+
+class ReviewerDisplayTests(unittest.TestCase):
+    def test_pdf_derived_label_and_duplicate_disambiguation(self):
+        meta = [
+            dict(file="very_long_private_filename_a.pdf", range_name="Mint Calm",
+                 product_type_standard="SAUCEPAN", size_cm=16),
+            dict(file="very_long_private_filename_b.pdf", range_name="Mint Calm",
+                 product_type_standard="SAUCEPAN", size_cm=16),
+        ]
+        self.assertEqual(product_title(meta[0]), "Mint Calm · 편수냄비 · 16cm")
+        mapping = product_labels(meta, [x["file"] for x in meta])
+        self.assertNotEqual(mapping[meta[0]["file"]], mapping[meta[1]["file"]])
+        self.assertNotIn(".pdf", mapping[meta[0]["file"]])
+        original = [{"file": meta[0]["file"], "status": "OK"}]
+        shown = display_file_table(original, mapping)
+        self.assertEqual(shown[0]["제품"], mapping[meta[0]["file"]])
+        self.assertNotIn("file", shown[0])
+        self.assertEqual(original[0]["file"], meta[0]["file"])
+
+    def test_unknown_label_does_not_guess_from_filename(self):
+        mapping = product_labels([dict(file="Casserole_18cm_foo.pdf",
+                                      range_name=None,
+                                      product_type_standard="UNKNOWN",
+                                      size_cm=None)], ["Casserole_18cm_foo.pdf"])
+        self.assertEqual(mapping["Casserole_18cm_foo.pdf"], "제품정보 확인 필요")
 
 
 class EmbeddedReferenceIntegrationTests(unittest.TestCase):
