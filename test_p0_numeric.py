@@ -39,6 +39,36 @@ class NumericPipelineTests(unittest.TestCase):
         self.assertEqual(korean_segment(fake_line("2025 기준"))[1],
                          "2025 기준")
 
+    def test_thai_translation_after_euromonitor_is_excluded(self):
+        source = (
+            "테팔 세계판매 1위 주방용품. Euromonitor International Limited, "
+            "Home and Garden 2026 에디션, 주방용품 카테고리 브랜드 매출, "
+            "2025 기준 / ทีฟาล์วอันดับหนึ่งในโลกด้านผลิตภัณฑ์อุปกรณ์ที่ใช้"
+            "ประกอบอาหารบนเตา. ที่มา:"
+        )
+        extracted = korean_segment(fake_line(source))
+        self.assertIsNotNone(extracted)
+        self.assertEqual(
+            extracted[1],
+            "테팔 세계판매 1위 주방용품. Euromonitor International Limited, "
+            "Home and Garden 2026 에디션, 주방용품 카테고리 브랜드 매출, 2025 기준",
+        )
+        self.assertNotIn("ทีฟาล์ว", extracted[1])
+        self.assertEqual(len(extracted[0]), len(extracted[1]))
+
+    def test_other_language_translation_is_not_in_korean_result(self):
+        for foreign in (
+            "ภาษาไทย", "中文內容", "日本語の翻訳", "النص العربي",
+            "Vietnamese translation", "Русский текст",
+        ):
+            source = "가스레인지 사용 가능 / " + foreign
+            result = korean_segment(fake_line(source))
+            self.assertEqual(result[1], "가스레인지 사용 가능", foreign)
+
+    def test_korean_numeric_fraction_slash_remains_intact(self):
+        for source in ("18/10 스테인리스 스틸", "최대 40% 수납", "2025 기준"):
+            self.assertEqual(korean_segment(fake_line(source))[1], source)
+
     def test_citation_fragments_need_real_source(self):
         quote, warnings = source_citation_prefix(
             "Limited, Home and Garden 2026 에디션, 브랜드 매출, 2025 기준",
