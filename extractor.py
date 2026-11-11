@@ -16,6 +16,12 @@ import pytesseract
 
 KOR = re.compile("[가-힣]")
 FOREIGN = re.compile(r"[A-Za-zÀ-ÿА-Яа-я]{3,}")
+# Other scripts in multilingual packaging are not Korean review copy.
+# Preserve the complete original only in raw PDF evidence.
+NON_KOREAN_SCRIPT = re.compile(
+    r"[\u0e00-\u0e7f\u0600-\u06ff\u0750-\u077f"
+    r"\u3040-\u30ff\u3400-\u9fff\u0400-\u052f]"
+)
 
 
 # Latin-language bibliographic attributions can be embedded in Korean copy.
@@ -28,8 +34,9 @@ INLINE_SOURCE = re.compile(
 
 
 def _korean_scope_end(text, hangul_position):
-    """Stop before foreign translations but keep embedded English citations."""
+    """Limit Korean copy while retaining its actual inline English citation."""
     protected_until = -1
+    latin_end = len(text)
     for foreign in FOREIGN.finditer(text, hangul_position + 1):
         if foreign.start() < protected_until:
             continue
@@ -37,9 +44,10 @@ def _korean_scope_end(text, hangul_position):
         if source:
             protected_until = source.end()
             continue
-        return foreign.start()
-    return len(text)
-
+        latin_end = foreign.start()
+        break
+    other_script = NON_KOREAN_SCRIPT.search(text, hangul_position + 1)
+    return min(latin_end, other_script.start() if other_script else len(text))
 
 
 def korean_segment(line):
