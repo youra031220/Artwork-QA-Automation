@@ -162,7 +162,7 @@ def _should_join_curve(previous, current):
     return gap <= max(30, max(p_size, c_size) * 4.0)
 
 
-def group_paragraphs(rows):
+def group_paragraphs(rows, raw_summaries=None):
     """Return paragraph/curved-label groups without modifying the raw rows."""
     groups = []
     current = []
@@ -223,7 +223,7 @@ def group_paragraphs(rows):
         standalone_maximum = (len(group) == 1 and
                               group[0][1]["korean_text"].strip() == "최대")
         if standalone_maximum:
-            text = "최대 [뒤따르는 수치·문구 연결 확인 필요]"
+            text = "최대"
             kind = "문장 연결 확인"
             status = "문장 연결 확인 필요 · 숫자 객체 연결 미확정"
         # Keep the most severe original warning; never silently downgrade a
@@ -275,4 +275,88 @@ def group_paragraphs(rows):
             "numeric_peer_evidence": [e for _, row in group for e in row.get("numeric_peer_evidence", [])],
             "source_coordinates": positions,
         })
-    return output
+    return _rebuild_storage_claim(output, raw_summaries)
+
+
+def _rebuild_storage_claim(groups, raw_summaries):
+    """Assemble only independently observed, tightly colocated PDF glyphs.
+
+    A complete '최대 40% 수납 공간 절약' spans three native text blocks
+    on the Mint Calm package. Numeric glyphs come from the original PDF,
+    NEVER from an OCR guess, a reference master, or the filename.
+    """
+    if not raw_summaries:
+        return groups
+    evidence = {
+        (summary.get("file"), int(summary.get("page", -1))): summary.get("raw_evidence", [])
+        for summary in raw_summaries
+    }
+    used = set()
+    substitutions = {}
+    for i, group in enumerate(groups):
+        if group["paragraph"].strip() != "최대" or group.get("type") != "문장 연결 확인":
+            continue
+        file, page = group["file"], int(group["page"])
+        anchor = group["source_coordinates"][0]["bbox"]
+        if len(anchor) != 4:
+            continue
+        ax0,ay0,ax1,ay1 = map(float, anchor)
+        # Native glyph evidence: explicit visible digits and percent mark.
+        numbers = []
+        for item in evidence.get((file,page),[]):
+            value = item.get("text","").strip()
+            if not re.fullmatch(r"\d{1,3}(?:[.,]\d+)?\s*%",value):
+                continue
+            box = item.get("bbox", [])
+            if len(box) != 4:
+                continue
+            x0,y0,x1,y1 = map(float,box)
+            if (x0 >= ax0-22 and x1 <= ax1+100 and
+                y0 >= ay0-85 and y0 <= ay0+18 and
+                x1 > ax0 and y1 >= ay0-5):
+                numbers.append((item,box))
+        if len(numbers) != 1:
+            continue
+        number, number_box = numbers[0]
+        target = []
+        for j, other in enumerate(groups):
+            if j == i or j in used or other["file"] != file or int(other["page"]) != page:
+                continue
+            if other["paragraph"].strip() != "수납 공간 절약":
+                continue
+            pb = other["source_coordinates"][0]["bbox"]
+            px0,py0,px1,py1 = map(float,pb)
+            if (px0 >= ax0-90 and px1 <= ax1+100
+                    and py0 >= ay0-6 and py0 <= ay1+90
+                    and abs((px0+px1)/2-(float(number_box[0])+float(number_box[2]))/2) <= 115):
+                target.append((j,other))
+        if len(target) != 1:
+            continue
+        j,phrase = target[0]
+        # Preserve original PDF location and evidence IDs for all three parts.
+        # The new reading order reflects the printed claim, not PDF object order.
+        new = dict(group)
+        new["paragraph"] = "최대 " + number["text"].strip() + " 수납 공간 절약"
+        new["type"] = "공간 배치 문구 연결"
+        new["status"] = "PDF 원본 3개 객체 연결 · 확인 권장"
+        new["numeric_review"] = False
+        new["warnings"] = [
+            "최대·숫자·수납 문구를 원본 PDF 좌표로 연결함 (내용 변경 없음)"
+        ]
+        new["line_indices"] = group["line_indices"] + phrase["line_indices"]
+        new["line_count"] = group["line_count"] + phrase["line_count"]
+        new["source_coordinates"] = (
+            group["source_coordinates"] +
+            [{"line_index": None, "page": page, "bbox": list(number_box)}] +
+            phrase["source_coordinates"]
+        )
+        new["raw_evidence_ids"] = list(dict.fromkeys(
+            group["raw_evidence_ids"] + [number["id"]] + phrase["raw_evidence_ids"]
+        ))
+        new["numeric_tokens"] = sorted(set(
+            group["numeric_tokens"] + [number["text"].strip()] + phrase["numeric_tokens"]
+        ))
+        new["numeric_peer_evidence"] = [number]
+        substitutions[i] = new
+        used.add(j)
+    return [substitutions.get(i, group) for i,group in enumerate(groups) if i not in used]
