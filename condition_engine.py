@@ -63,6 +63,34 @@ def evaluate_conditions(metadata, matches, summaries):
                 "OK" if korean else "REVIEW",
                 "영문 인덕션 제외 표기와 대응 국문 " + ("함께 발견" if korean else "미발견 · 수동 확인"),
                 heat_en.group(), "English ALL HOBS EXCEPT INDUCTION -> Korean exception")
+        # Recyclability mark/label implies the corresponding Korean
+        # disposal notice may be required. Native text cannot prove an image
+        # symbol is present or absent.
+        if re.search(r"RECYCLABLE|RECYCLING|ACIER\s+RECYCLABLE|재활용\s*가능",source,re.I):
+            has_disposal=bool(re.search(r"적절한\s*분리\s*배출|적절한\s*분리배출",ko))
+            lid_glass=product.get("lid_material") in ("glass","GLASS")
+            excluded=bool(re.search(r"유리\s*뚜껑\s*제외",ko))
+            reason=("재활용 텍스트 앵커 발견. " +
+                    ("분리배출 안내 국문 확인됨" if has_disposal
+                     else "분리배출 안내 국문 미확인") +
+                    (" · 유리 뚜껑 제외 표기 확인 필요" if lid_glass and not excluded else ""))
+            add("P1-RECYCLE","재활용","REVIEW",reason,
+                "RECYCLABLE", "recycle label -> Korean disposal notice")
+        if product.get("product_type_standard")=="STEWPOT" and product.get("size_cm")==18:
+            found=bool(re.search(r"뚝배기",ko))
+            add("P1-18CM-STEW","제품 타입·번역","REVIEW",
+                "18cm 양수냄비 번역 예외: " +
+                ("뚝배기 문구 발견 · 맥락 확인" if found else "뚝배기 표기 미발견"),
+                "18cm STEWPOT", "size_cm == 18 and type == STEWPOT")
+        # Source performance multipliers are variable by range (not a
+        # single approved fixed number). Keep candidate values for QA.
+        coating_numbers=re.findall(r"(?:최대\s*)?(\d{1,2})\s*배.{0,20}코팅",ko)
+        if coating_numbers:
+            values=sorted(set(map(int,coating_numbers)))
+            add("P1-COATING-Y","성능 수치","REVIEW",
+                "코팅 성능 배수 발견: "+", ".join(map(str,values))+
+                "배 · 적용 레인지의 승인 변수와 대조 필요",
+                ", ".join(coating_numbers), "Y = range-specific multiplier")
         size=product.get("size_cm")
         if size and product.get("product_type_standard") and product.get("product_type_standard")!="UNKNOWN":
             mm=re.findall(r"(?<!\d)(\d{2})\s*cm\b",ko,re.I)
