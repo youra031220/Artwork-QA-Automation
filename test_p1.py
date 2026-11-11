@@ -7,6 +7,8 @@ from zipfile import ZipFile
 from phrase_matcher import match_phrases
 from rule_engine import evaluate_rules, summarize_matches
 from condition_engine import evaluate_conditions
+from bilingual_engine import evaluate_bilingual
+from symbol_detector import inspect_symbols
 from qa_report import export_p1
 
 
@@ -113,6 +115,21 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(r["applicability"],"UNDETERMINED")
         self.assertEqual(r["status"],"REVIEW")
 
+    def test_english_heat_contradiction_without_korean(self):
+        output = evaluate_rules([], master(), "example.pdf", context={
+            "raw_pdf_text": "ALL HOBS + INDUCTION / ALL HOBS EXCEPT INDUCTION"
+        })
+        risk = next(r for r in output if r["rule_id"] == "P1-HEAT-CONFLICT")
+        self.assertEqual(risk["status"], "FAIL")
+
+    def test_warranty_scope_uncertain_requiring_review(self):
+        mm = [dict(file="example.pdf", extracted="제품 품질보증 2년"),
+              dict(file="example.pdf", extracted="스테인리스 품질보증 10년")]
+        output = evaluate_rules(mm, master(), "example.pdf")
+        risk = next(r for r in output if r["rule_id"] == "P1-WARRANTY-DURATION")
+        self.assertEqual(risk["status"], "REVIEW")
+        self.assertEqual(risk["distinct_variants"], 2)
+
     def test_report_archives_raw_and_unregistered(self):
         m=match_phrases([group("인덕션 사용 가능"),group("신규 문구")],master())
         rr=evaluate_rules(m,master(),"example.pdf")
@@ -124,6 +141,29 @@ class RuleTests(unittest.TestCase):
             self.assertEqual(items[0]["extracted"],"신규 문구")
             self.assertEqual(summary[0]["unregistered_count"],1)
 
+
+class BilingualAndSymbolsTests(unittest.TestCase):
+    def test_english_found_missing_korean_is_review(self):
+        evidence=[dict(file="example.pdf", raw_evidence=[dict(
+            text="ALL HOBS EXCEPT INDUCTION")])]
+        results=evaluate_bilingual(master(), [], evidence, "example.pdf")
+        matched=next(r for r in results if r["rule_id"]=="P1-BILINGUAL-P2")
+        self.assertEqual(matched["status"],"REVIEW")
+
+    def test_bilingual_pair_found_is_ok_not_approved(self):
+        evidence=[dict(file="example.pdf", raw_evidence=[dict(
+            text="ALL HOBS EXCEPT INDUCTION")])]
+        mm=match_phrases([group("인덕션 사용 불가")],master())
+        result=evaluate_bilingual(master(), mm, evidence, "example.pdf")
+        matched=next(r for r in result if r["rule_id"]=="P1-BILINGUAL-P2")
+        self.assertEqual(matched["status"],"OK")
+        self.assertEqual(matched["approval_status"],"UNVERIFIED")
+
+    def test_symbol_absence_is_never_auto_pass(self):
+        meta=[dict(file="example.pdf",manufacturing_country="FRANCE")]
+        results=inspect_symbols([],meta)
+        self.assertTrue(results)
+        self.assertTrue(all(r["status"]=="REVIEW" for r in results))
 
 class ConditionTests(unittest.TestCase):
     def test_france_badge_never_auto_pass(self):
