@@ -42,7 +42,7 @@ def _variable_year_match(actual, expected):
         return None
     # Only the explicitly marked year is variable; all other characters,
     # numbers, punctuation, and wording remain literal.
-    pattern = re.escape(expected_compact).replace("202x", r"(20\d{2})")
+    pattern = re.escape(expected_compact).replace("202x", r"(202\d)")
     found = re.fullmatch(pattern, compact(actual))
     return found.groups() if found else None
 
