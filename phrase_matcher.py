@@ -81,6 +81,28 @@ def _one(row, master):
                     reference_english=p.get("english_original",""),
                     approval_status=p.get("approval_status","UNVERIFIED"),
                     source_row=p.get("source_row"), reason="긴 추출 문구에 기준 문구가 포함됨")
+    # Workbook's Y is a range-specific multiplier placeholder. Identify the
+    # reference but do not claim it is approved before range validation.
+    variable_refs=[]
+    for p,v in refs:
+        expected=p["korean_original"]
+        if "Y배" not in expected and "Y 배" not in expected:
+            continue
+        pattern=re.escape(compact(expected))
+        pattern=pattern.replace("y배", r"(?P<multiplier>\d{1,2})배")
+        match=re.fullmatch(pattern,compact(actual))
+        if match:
+            variable_refs.append((p,v,match.group("multiplier")))
+    if variable_refs:
+        p,v,value=variable_refs[0]
+        return dict(base,status="OCR_REVIEW" if row.get("numeric_review") else "TEXT_MISMATCH",
+                    phrase_id=p["phrase_id"],rule_id=v.get("rule_id",""),
+                    category=p["category_id"],source_row=p.get("source_row"),
+                    approval_status=p.get("approval_status","UNVERIFIED"),
+                    reference_korean=p["korean_original"],
+                    reference_english=p.get("english_original",""),
+                    differences="Y="+value,
+                    reason="정답 데이터의 Y배 변수 후보: 레인지별 승인 배수 검토 필요")
     # Fuzzy hits only suggest a reference. No automatic approval or rule count.
     scored=[]
     for p,v in refs:
