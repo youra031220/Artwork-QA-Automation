@@ -489,7 +489,8 @@ if master is not None:
         b.metric("카테고리", len(set(p["category_id"] for p in master["phrases"])))
         c.metric("규칙 그룹", len(master["rules"]))
         d.metric("검토 이슈", len(master["validation_issues"]))
-        with st.expander("문구·규칙·변수·데이터 이슈", expanded=False):
+        st.markdown("**문구·규칙·변수·데이터 이슈**")
+        with st.container(border=True):
             st.write("**Rule Master**")
             st.dataframe(pd.DataFrame(master["rules"]), use_container_width=True, hide_index=True)
             st.write("**Phrase Master**")
