@@ -63,7 +63,7 @@ def _maximum_continuation(previous, current):
     if previous["korean_text"].strip() != "최대":
         return False
     phrase = current["korean_text"].strip()
-    if not re.match(r"^(?:(?:\ufffd{1,5}|\d{1,3})\s*%|수납\b|공간\s*절약\b)", phrase):
+    if not re.match(r"^(?:\ufffd{1,5}|\d{1,3})\s*%", phrase):
         return False
     if PARAGRAPH_START.match(phrase):
         return False
