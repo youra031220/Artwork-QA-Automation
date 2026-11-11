@@ -75,6 +75,27 @@ class PhraseMatcherTests(unittest.TestCase):
         self.assertEqual(x["status"],"NUMERIC_MISMATCH")
         self.assertEqual(x["phrase_id"],"P3")
 
+    def test_euromonitor_202x_years_are_independent_variables(self):
+        ref=("테팔 세계판매 1위 주방용품. Euromonitor International Limited, "
+             "Home and Garden 202X 에디션, 주방용품 카테고리 브랜드 매출, 202X 기준")
+        actual=("테팔 세계판매 1위 주방용품. Euromonitor International Limited, "
+                "Home and Garden 2026 에디션, 주방용품 카테고리 브랜드 매출, 2025 기준")
+        model=master()
+        model["phrases"].append(dict(phrase_id="P202",category_id="세계 1위",
+                                     korean_original=ref,english_original="",
+                                     approval_status="UNVERIFIED",source_row=202))
+        model["variants"].append(dict(phrase_id="P202",rule_id="R2",applicability=""))
+        result=match_phrases([group(actual)],model)[0]
+        self.assertEqual(result["status"],"VARIABLE_MATCH")
+        self.assertEqual(result["phrase_id"],"P202")
+        self.assertEqual(result["differences"],"연도 변수: 2026, 2025")
+        self.assertNotIn("불일치",result["differences"])
+        swapped=actual.replace("2026 에디션","2027 에디션").replace("2025 기준","2026 기준")
+        next_year=match_phrases([group(swapped)],model)[0]
+        self.assertEqual(next_year["status"],"VARIABLE_MATCH")
+        wrong=actual.replace("2025 기준","2015 기준")
+        self.assertNotEqual(match_phrases([group(wrong)],model)[0]["status"],"VARIABLE_MATCH")
+
     def test_multiplier_placeholder_requires_human_range_check(self):
         m=master()
         m["phrases"].append(dict(
