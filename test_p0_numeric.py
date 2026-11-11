@@ -165,12 +165,53 @@ class NumericPipelineTests(unittest.TestCase):
             "numeric_peer_evidence": [{"text": "40%", "bbox": [230, 100, 255, 111]}],
         }
         group = group_paragraphs([row])[0]
-        self.assertIn("연결 확인 필요", group["paragraph"])
+        self.assertEqual(group["paragraph"], "최대")
         self.assertEqual(group["type"], "문장 연결 확인")
         self.assertIn("문장 연결 확인 필요", group["status"])
         self.assertTrue(group["numeric_review"])
         self.assertEqual(group["numeric_peer_evidence"][0]["text"], "40%")
         self.assertEqual(row["korean_text"], "최대")
+
+    def test_native_three_object_storage_claim_reconstructed(self):
+        common = dict(file="mint.pdf", page=1, curved=False, dir_x=1, dir_y=0,
+                      block_id=1, line_id=0, status="원본 추출 정상",
+                      warnings=[], numeric_review=False, ocr_candidate="",
+                      native_numeric_tokens=[], raw_evidence_ids=[],
+                      numeric_peer_evidence=[], font_size=10)
+        maximum = dict(common, korean_text="최대", x0=1456.50, y0=848.80,
+                       x1=1475.45, y1=859.04, block_id=59)
+        phrase = dict(common, korean_text="수납 공간 절약",
+                      x0=1426.22, y0=861.25, x1=1540.41, y1=893.85,
+                      block_id=47)
+        summary = dict(file="mint.pdf", page=1, raw_evidence=[
+            dict(id="p1:b48:l0", text="40%",
+                 bbox=[1479.60,817.41,1538.90,873.80]),
+            dict(id="p1:b46:l0", text="40%",
+                 bbox=[838.86,787.80,898.16,844.19]),
+        ])
+        groups = group_paragraphs([maximum,phrase], raw_summaries=[summary])
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["paragraph"], "최대 40% 수납 공간 절약")
+        self.assertEqual(len(groups[0]["source_coordinates"]), 3)
+        self.assertIn("p1:b48:l0", groups[0]["raw_evidence_ids"])
+        self.assertNotIn("p1:b46:l0", groups[0]["raw_evidence_ids"])
+        self.assertFalse(groups[0]["numeric_review"])
+
+    def test_no_native_number_keeps_maximum_without_fabricated_content(self):
+        common = dict(file="mint.pdf", page=1, curved=False, dir_x=1, dir_y=0,
+                      block_id=1, line_id=0, status="원본 추출 정상",
+                      warnings=[], numeric_review=False, ocr_candidate="",
+                      native_numeric_tokens=[], raw_evidence_ids=[],
+                      numeric_peer_evidence=[], font_size=10)
+        maximum=dict(common, korean_text="최대", x0=1456,y0=848,
+                     x1=1475,y1=859)
+        phrase=dict(common, korean_text="수납 공간 절약",
+                    x0=1426,y0=861,x1=1540,y1=894,block_id=2)
+        groups=group_paragraphs([maximum,phrase],raw_summaries=[
+            dict(file="mint.pdf",page=1,raw_evidence=[])])
+        self.assertEqual(len(groups),2)
+        self.assertEqual(groups[0]["paragraph"],"최대")
+        self.assertEqual(groups[1]["paragraph"],"수납 공간 절약")
 
     def test_maximum_joins_only_adjacent_following_claim(self):
         base = {
