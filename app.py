@@ -9,6 +9,8 @@ from embedded_reference import load_master
 from phrase_matcher import match_phrases
 from rule_engine import evaluate_rules, summarize_matches
 from condition_engine import evaluate_conditions
+from bilingual_engine import evaluate_bilingual
+from symbol_detector import inspect_symbols
 from qa_report import export_p1
 import io
 import zipfile
@@ -229,6 +231,11 @@ if st.session_state.get("qa_result"):
                 for result in evaluate_rules(p1_matches, p1_master, filename)
             ]
             p1_rules.extend(evaluate_conditions(product_metadata, p1_matches, summaries))
+            for filename in all_files:
+                p1_rules.extend(evaluate_bilingual(
+                    p1_master, p1_matches, summaries, filename
+                ))
+            p1_rules.extend(inspect_symbols(summaries, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
             if p1_summary:
                 st.dataframe(pd.DataFrame(p1_summary), use_container_width=True,
