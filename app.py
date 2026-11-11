@@ -212,7 +212,7 @@ if st.session_state.get("qa_result"):
         a.metric("국문 문구 줄", len(rows))
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
         c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
-        grouped = group_paragraphs(rows)
+        grouped = group_paragraphs(rows, raw_summaries=summaries)
         numeric_reviews = [g for g in grouped if g.get("numeric_review")]
         if numeric_reviews:
             st.warning(
