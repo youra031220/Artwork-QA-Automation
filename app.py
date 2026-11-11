@@ -240,15 +240,14 @@ if st.session_state.get("qa_result"):
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
             if p1_summary:
-                st.dataframe(pd.DataFrame(p1_summary), use_container_width=True,
-                             hide_index=True)
+                st.dataframe(pd.DataFrame(shown_records(p1_summary)).rename(columns={"extracted_count": "추출 문구", "matched_count": "기준 일치", "unregistered_count": "미등록", "ocr_review_count": "글자·숫자 확인", "rule_ok": "조건 충족", "rule_review": "검토 필요", "rule_fail": "오류", "overall": "종합 결과"}), use_container_width=True, hide_index=True)
             tab_matches, tab_rules, tab_unknown, tab_evidence = st.tabs(
                 ["정답 대조", "카테고리별 규칙", "미등록 문구", "근거·상세정보"]
             )
             # Keep internal IDs and coordinate arrays in the evidence panel;
             # the primary tables contain only actionable reviewer information.
             match_columns = {
-                "file": "파일", "page": "페이지", "extracted": "PDF 추출 문구",
+                "제품": "제품", "page": "페이지", "extracted": "PDF 추출 문구",
                 "status": "대조 결과", "category": "카테고리",
                 "reference_korean": "기준 국문", "reference_english": "기준 영문",
                 "differences": "차이점", "reason": "검토 사유",
@@ -260,7 +259,7 @@ if st.session_state.get("qa_result"):
                 "status": "판정", "finding": "검수 결과",
             }
             def reviewer_table(records, columns):
-                view = pd.DataFrame(records)
+                view = pd.DataFrame(shown_records(records))
                 return view.reindex(columns=list(columns)).rename(columns=columns)
 
             with tab_matches:
@@ -272,7 +271,7 @@ if st.session_state.get("qa_result"):
             with tab_rules:
                 if p1_rules:
                     rule_file = st.selectbox(
-                        "검수할 PDF", all_files, key="p1_rule_file"
+                        "검수할 제품", all_files, format_func=shown_file, key="p1_rule_file"
                     )
                     relevant_rules = [
                         r for r in p1_rules if r["file"] == rule_file
@@ -290,7 +289,7 @@ if st.session_state.get("qa_result"):
                 if unknown:
                     st.dataframe(
                         reviewer_table(unknown, {
-                            "file": "파일", "page": "페이지",
+                            "제품": "제품", "page": "페이지",
                             "extracted": "미등록 국문",
                             "reason": "검토 사유",
                         }),
