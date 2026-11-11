@@ -162,7 +162,9 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 "display_label": numeric_label or color,
                 "rects": ([rect for i in indices for rect in (
                     [rect_from_row(page_rows[i])] + _citation_rects(page_rows[i], evidence)
-                )] + [hit["rect"] for hit in claim_context]),
+                )] + [hit["rect"] for hit in claim_context]
+                + [pos["bbox"] for pos in group.get("source_coordinates", [])
+                   if pos.get("line_index") is None and pos.get("bbox")]),
             })
     else:
         for row_index, row in page_rows.items():
