@@ -6,6 +6,10 @@ from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
 from product_parser import parse_product_pdf
 from embedded_reference import load_master
+from phrase_matcher import match_phrases
+from rule_engine import evaluate_rules, summarize_matches
+from condition_engine import evaluate_conditions
+from qa_report import export_p1
 import io
 import zipfile
 import json
@@ -213,6 +217,90 @@ if st.session_state.get("qa_result"):
                 f"수치 확인이 필요한 문단 {len(numeric_reviews)}건이 있습니다. "
                 "OCR 후보와 PDF 원본을 비교해야 하며 자동 승인되지 않습니다."
             )
+        st.subheader("P1 · 기준 문구 대조 및 자동 검수")
+        st.caption("P1은 기준 데이터와의 일치 여부를 보여주며, 직원의 최종 아트웍 승인을 대체하지 않습니다. 이미지 마크·불완전한 원장 조건은 REVIEW입니다.")
+        try:
+            p1_master = load_p0_master()
+            p1_matches = match_phrases(grouped, p1_master)
+            all_files = sorted({g["file"] for g in grouped} | {m["file"] for m in product_metadata})
+            p1_rules = [
+                result
+                for filename in all_files
+                for result in evaluate_rules(p1_matches, p1_master, filename)
+            ]
+            p1_rules.extend(evaluate_conditions(product_metadata, p1_matches, summaries))
+            p1_summary = summarize_matches(p1_matches, p1_rules)
+            if p1_summary:
+                st.dataframe(pd.DataFrame(p1_summary), use_container_width=True,
+                             hide_index=True)
+            tab_matches, tab_rules, tab_unknown, tab_evidence = st.tabs(
+                ["정답 대조", "카테고리별 규칙", "미등록 문구", "PDF 근거"]
+            )
+            with tab_matches:
+                st.caption("매칭은 기존 추출 문구를 변경하지 않습니다. UNVERIFIED는 기준 데이터의 승인 상태입니다.")
+                st.dataframe(pd.DataFrame(p1_matches), use_container_width=True,
+                             hide_index=True)
+            with tab_rules:
+                if p1_rules:
+                    rule_file = st.selectbox("검수할 PDF", all_files,
+                                             key="p1_rule_file")
+                    relevant_rules = [r for r in p1_rules if r["file"] == rule_file]
+                    st.dataframe(pd.DataFrame(relevant_rules),
+                                 use_container_width=True, hide_index=True)
+                    st.caption("found_occurrences는 기준과 확정 매칭된 횟수입니다. distinct_variants는 서로 다른 정답 유형 수입니다. 기준 미등록·조건 미확정은 REVIEW로 남습니다.")
+            with tab_unknown:
+                unknown = [m for m in p1_matches if m["status"] == "UNREGISTERED"]
+                st.metric("정답 데이터 미등록 문구", len(unknown))
+                if unknown:
+                    st.dataframe(pd.DataFrame(unknown),
+                                 use_container_width=True, hide_index=True)
+                else:
+                    st.info("미등록 문구 없음. 다만 OCR 및 문장 연결 오류가 없는지 확인하세요.")
+            with tab_evidence:
+                options = [
+                    (idx, m) for idx, m in enumerate(p1_matches)
+                    if m.get("source_coordinates")
+                ]
+                if options:
+                    pick = st.selectbox(
+                        "PDF 근거 문구 선택", range(len(options)),
+                        format_func=lambda j: (
+                            f'{options[j][1]["file"]} · p.{options[j][1]["page"]}'
+                            f' · {options[j][1]["status"]} · {options[j][1]["extracted"][:65]}'
+                        ), key="p1_evidence_item"
+                    )
+                    entry = options[pick][1]
+                    rectangles = [
+                        pos["bbox"] for pos in entry["source_coordinates"]
+                        if pos.get("bbox")
+                    ]
+                    selected_file = next(
+                        (item for item in files if item.name == entry["file"]), None
+                    )
+                    st.write("**원본 추출:**", entry["extracted"])
+                    st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
+                    st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
+                    st.write("**판정 근거:**", entry["reason"])
+                    if selected_file and rectangles:
+                        crop = render_selected_crop(
+                            selected_file.getvalue(), int(entry["page"]),
+                            {"rects": rectangles, "label": entry["extracted"],
+                             "status": entry["status"]}
+                        )
+                        if crop is not None:
+                            st.image(crop, caption="PDF 원본 근거 (강조된 추출 위치)",
+                                     use_container_width=True)
+                else:
+                    st.info("좌표를 가진 추출 문구가 없습니다.")
+            st.download_button(
+                "P1 검수 보고서 ZIP 다운로드",
+                export_p1(p1_matches, p1_rules, p1_summary),
+                "artwork_p1_qa_report.zip", mime="application/zip",
+                key="p1_download",
+            )
+        except Exception as p1_exc:
+            st.error("P1 검수 오류 (기존 P0 추출은 계속 사용 가능): " + str(p1_exc))
+
         st.subheader("추출 문구 정리")
         st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
