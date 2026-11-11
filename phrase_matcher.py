@@ -30,6 +30,23 @@ def contradicts(a, b):
     return False
 
 
+def _variable_year_match(actual, expected):
+    """Match each literal '202X' in an approved template independently.
+
+    The template does not assert that the edition and sales years are equal.
+    Preserve the observed values: a pattern match is not proof that this year's
+    attribution is commercially approved.
+    """
+    expected_compact = compact(expected)
+    if "202x" not in expected_compact:
+        return None
+    # Only the explicitly marked year is variable; all other characters,
+    # numbers, punctuation, and wording remain literal.
+    pattern = re.escape(expected_compact).replace("202x", r"(20\d{2})")
+    found = re.fullmatch(pattern, compact(actual))
+    return found.groups() if found else None
+
+
 def _reference_candidates(master):
     variants = {v["phrase_id"]: v for v in master.get("variants", [])}
     return [(p, variants.get(p["phrase_id"], {})) for p in master.get("phrases", [])
@@ -81,6 +98,27 @@ def _one(row, master):
                     reference_english=p.get("english_original",""),
                     approval_status=p.get("approval_status","UNVERIFIED"),
                     source_row=p.get("source_row"), reason="긴 추출 문구에 기준 문구가 포함됨")
+    # '202X' is a per-occurrence year placeholder, not a literal number.
+    # This must run before fuzzy/numeric mismatch detection.
+    year_matches = [(p,v,values) for p,v in refs
+                    if (values := _variable_year_match(actual,p["korean_original"])) is not None]
+    if year_matches:
+        unique = {p["phrase_id"] for p,v,values in year_matches}
+        if len(unique)>1:
+            return dict(base, status="AMBIGUOUS_MATCH",
+                        candidates=sorted(unique),
+                        reason="연도 변수 패턴에 일치하는 복수 기준 문구")
+        p,v,values=year_matches[0]
+        return dict(base,
+                    status="OCR_REVIEW" if row.get("numeric_review") or DAMAGE.search(actual)
+                    else "VARIABLE_MATCH",
+                    phrase_id=p["phrase_id"],rule_id=v.get("rule_id",""),
+                    category=p["category_id"],source_row=p.get("source_row"),
+                    approval_status=p.get("approval_status","UNVERIFIED"),
+                    reference_korean=p["korean_original"],
+                    reference_english=p.get("english_original",""),
+                    differences="연도 변수: " + ", ".join(values),
+                    reason="202X 연도 변수 패턴 일치 · 에디션/매출 기준연도 적합성은 별도 확인")
     # Workbook's Y is a range-specific multiplier placeholder. Identify the
     # reference but do not claim it is approved before range validation.
     variable_refs=[]
