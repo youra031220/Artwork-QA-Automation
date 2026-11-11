@@ -59,6 +59,19 @@ class PhraseMatcherTests(unittest.TestCase):
         self.assertEqual(x["status"],"NUMERIC_MISMATCH")
         self.assertEqual(x["phrase_id"],"P3")
 
+    def test_multiplier_placeholder_requires_human_range_check(self):
+        m=master()
+        m["phrases"].append(dict(
+            phrase_id="P6",category_id="특장점",
+            korean_original="최대 Y배 더 오래가는 코팅",
+            english_original="UP TO YX LONGER LASTING",
+            approval_status="UNVERIFIED",source_row=99))
+        m["variants"].append(dict(phrase_id="P6",rule_id="R2",applicability=""))
+        match=match_phrases([group("최대 3배 더 오래가는 코팅")],m)[0]
+        self.assertEqual(match["status"],"TEXT_MISMATCH")
+        self.assertEqual(match["phrase_id"],"P6")
+        self.assertEqual(match["differences"],"Y=3")
+
     def test_numeric_damage_requires_review(self):
         x=match_phrases([group("최대 ��% 수납 공간 절약",damage=True)],master())[0]
         self.assertEqual(x["status"],"OCR_REVIEW")
@@ -171,6 +184,16 @@ class ConditionTests(unittest.TestCase):
                                          manufacturing_country="FRANCE")],[],[])
         r=next(r for r in results if r["rule_id"]=="P1-FR-BADGE")
         self.assertEqual(r["status"],"REVIEW")
+
+    def test_18cm_stewpot_translation_is_review(self):
+        results=evaluate_conditions([
+            dict(file="example.pdf",manufacturing_country="CHINA",
+                 product_type_standard="STEWPOT",size_cm=18,
+                 has_lid=False)
+        ],[],[])
+        result=next(r for r in results if r["rule_id"]=="P1-18CM-STEW")
+        self.assertEqual(result["status"],"REVIEW")
+        self.assertIn("뚝배기",result["finding"])
 
     def test_english_heat_requires_korean(self):
         summaries=[dict(file="example.pdf",raw_evidence=[
