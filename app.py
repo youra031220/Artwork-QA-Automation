@@ -82,11 +82,20 @@ if st.session_state.get("qa_result"):
             {field: item.get(field) for field in meta_fields}
             for item in product_metadata
         ])
-        st.dataframe(meta_table, use_container_width=True, hide_index=True)
-        pick_file = st.selectbox("근거 확인할 파일", [m["file"] for m in product_metadata],
-                                 key="p0_meta_file")
+        basic_info = [{
+            "제품": shown_file(item["file"]),
+            "제품유형": item.get("product_type_raw") or "확인 필요",
+            "제품코드": item.get("cmmf") or "확인 필요",
+            "제조국": item.get("manufacturing_country") or "확인 필요",
+            "확인 상태": "검토 필요" if item.get("parse_status") == "REVIEW" else "추출 완료",
+        } for item in product_metadata]
+        st.dataframe(pd.DataFrame(basic_info), use_container_width=True, hide_index=True)
+        st.caption("제품명은 PDF에서 읽은 레인지명·제품유형·크기로 표시합니다. 추출 성공은 최종 검수 승인을 뜻하지 않습니다.")
+        pick_file = st.selectbox("상세 확인할 제품", [m["file"] for m in product_metadata],
+                                 format_func=shown_file, key="p0_meta_file")
         detail = next(m for m in product_metadata if m["file"] == pick_file)
-        with st.expander("제품정보 원문과 PDF 좌표"):
+        with st.expander("제품정보 근거·원본 파일명"):
+            st.caption(f"원본 파일명: {pick_file}")
             evidence_rows = []
             for field, items in detail.get("evidence", {}).items():
                 for item in items:
@@ -135,20 +144,27 @@ if st.session_state.get("qa_result"):
         a.metric("OK 제품", int((overall["종합 판정"] == "OK").sum()))
         b.metric("REVIEW 제품", int((overall["종합 판정"] == "REVIEW").sum()))
         c.metric("FAIL 제품", int((overall["종합 판정"] == "FAIL").sum()))
-        st.dataframe(overall, use_container_width=True, hide_index=True)
-        st.dataframe(
-            checks_df[["file", "page", "location", "check", "comparison_reference", "extracted",
-                       "status", "context", "x0", "y0", "note"]],
-            use_container_width=True, hide_index=True
+        st.dataframe(pd.DataFrame(shown_records(overall.to_dict("records"))), use_container_width=True, hide_index=True)
+        identity_view = shown_records(
+            checks_df[["file", "page", "check", "comparison_reference", "extracted",
+                       "status", "note"]].to_dict("records")
         )
-        st.caption("종합 판정은 PDF 내부의 전면 제품명과 GAMME 철자 일치만 사용합니다. 파일명과 PRODUIT는 참고용이며 종합 판정에 반영되지 않습니다. 주변 광고 문구는 별도의 승인 원문이 있어야 검수할 수 있습니다.")
+        st.dataframe(
+            pd.DataFrame(identity_view).rename(columns={
+                "page": "페이지", "check": "확인 항목",
+                "comparison_reference": "비교 기준", "extracted": "PDF 실제 문구",
+                "status": "판정", "note": "검토 사유",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+        st.caption("포장에 인쇄된 제품명과 PDF 작업정보의 레인지명이 일치하는지 확인합니다. 원본 파일명은 판정에 사용하지 않습니다.")
         with st.expander("PDF 추출 위치 미리보기 · 근거 확인"):
             available = checks_df[checks_df["x0"].notna()]
             if available.empty:
                 st.info("좌표가 확인된 문구가 없습니다.")
             else:
                 file_options = available["file"].drop_duplicates().tolist()
-                selected_file = st.selectbox("PDF 파일", file_options, key="identity_file")
+                selected_file = st.selectbox("제품 선택", file_options, format_func=shown_file, key="identity_file")
                 source_rows = available[available["file"] == selected_file]
                 labels = [
                     f"{r['check']} · p.{int(r['page'])} · {r['extracted']}"
