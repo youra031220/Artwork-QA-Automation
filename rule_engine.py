@@ -2,7 +2,7 @@
 from collections import Counter, defaultdict
 import re
 
-ACCEPTED = {"EXACT_MATCH", "NORMALIZED_MATCH"}
+ACCEPTED = {"EXACT_MATCH", "NORMALIZED_MATCH", "VARIABLE_MATCH"}
 REVIEW_STATES = {"OCR_REVIEW", "NUMERIC_MISMATCH", "TEXT_MISMATCH", "AMBIGUOUS_MATCH"}
 
 
@@ -151,7 +151,7 @@ def summarize_matches(matches, rules):
         summaries.append({
             "file":filename,
             "extracted_count":len(mm),
-            "matched_count":counts["EXACT_MATCH"]+counts["NORMALIZED_MATCH"],
+            "matched_count":counts["EXACT_MATCH"]+counts["NORMALIZED_MATCH"]+counts["VARIABLE_MATCH"],
             "unregistered_count":counts["UNREGISTERED"],
             "ocr_review_count":counts["OCR_REVIEW"],
             "rule_ok":rc["OK"],"rule_review":rc["REVIEW"],"rule_fail":rc["FAIL"],
