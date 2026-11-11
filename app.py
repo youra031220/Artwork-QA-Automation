@@ -362,17 +362,21 @@ if st.session_state.get("qa_result"):
             st.error("기준 문구 검수 중 오류가 발생했습니다. 추출 문구는 아래에서 확인할 수 있습니다: " + str(p1_exc))
 
         st.subheader("PDF에서 찾은 전체 문구")
-        st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
+        st.caption("PDF에서 인식한 전체 문구입니다. 기준에 등록되지 않은 문구도 제외하지 않습니다.")
         groups_df = pd.DataFrame(grouped)
-        st.dataframe(
-            groups_df[["file", "page", "type", "paragraph", "line_count", "status", "warnings", "numeric_review", "ocr_candidates"]],
-            use_container_width=True, hide_index=True
-        )
+        group_view = pd.DataFrame(shown_records(grouped)).rename(columns={
+            "page": "페이지", "type": "문구 유형",
+            "paragraph": "추출 문구", "status": "확인 상태",
+        })
+        st.dataframe(group_view[["제품", "페이지", "문구 유형", "추출 문구", "확인 상태"]],
+                     use_container_width=True, hide_index=True)
         with st.expander("원본 줄별 추출 결과 보기"):
-            st.dataframe(
-                df[["file", "page", "korean_text", "status", "warnings", "numeric_review", "pdf_original", "ocr_candidate", "numeric_peer_evidence"]],
-                use_container_width=True, hide_index=True
-            )
+            raw_view = pd.DataFrame(shown_records(rows)).rename(columns={
+                "page": "페이지", "korean_text": "원본 줄",
+                "status": "확인 상태", "ocr_candidate": "다시 읽은 문구",
+            })
+            st.dataframe(raw_view[["제품", "페이지", "원본 줄", "확인 상태", "다시 읽은 문구"]],
+                         use_container_width=True, hide_index=True)
         st.subheader("PDF 문구 위치 확인")
         st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
         view_files = sorted(set(
