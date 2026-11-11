@@ -12,15 +12,16 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
+from ui_labels import product_labels, display_file_table
 import io
 import zipfile
 import json
 import fitz
 import hashlib
 
-st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출", layout="wide")
-st.title("아트웍 검수 자동화")
-st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
+st.set_page_config(page_title="아트웍 문구 검수", layout="wide")
+st.title("아트웍 문구 검수")
+st.caption("PDF를 업로드하면 제품정보와 문구를 확인하고 기준 문구와 다른 부분을 찾아줍니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
 master = None
 try:
@@ -38,7 +39,7 @@ if st.session_state.get("qa_signature") != signature:
     st.session_state.pop("qa_result", None)
     st.session_state["qa_signature"] = signature
 
-if st.button("텍스트 추출", type="primary", disabled=not files):
+if st.button("문구 검수 시작", type="primary", disabled=not files):
     rows, summaries, errors, identity_checks, product_metadata = [], [], [], [], []
     bar = st.progress(0)
     for index, file in enumerate(files):
@@ -62,10 +63,15 @@ if st.session_state.get("qa_result"):
         data["rows"], data["summaries"], data["errors"], data["identity_checks"]
     )
     product_metadata = data.get("product_metadata", [])
+    reviewer_labels = product_labels(product_metadata, {m["file"] for m in product_metadata} | {r["file"] for r in rows} | {c["file"] for c in identity_checks})
+    def shown_file(filename):
+        return reviewer_labels.get(filename, "제품정보 확인 필요")
+    def shown_records(records):
+        return display_file_table(records, reviewer_labels)
     if errors:
         st.error("\n".join(errors))
     if product_metadata:
-        st.subheader("P0 · PDF 제품정보 구조화 (검수 승인 아님)")
+        st.subheader("제품 기본정보")
         meta_fields = [
             "file", "range_name", "cmmf", "dossier", "product_type_raw",
             "product_type_standard", "size_cm", "capacity_l", "has_lid",
@@ -117,7 +123,7 @@ if st.session_state.get("qa_result"):
                            "p0_product_metadata.json", mime="application/json")
 
     if identity_checks:
-        st.subheader("패키지 제품명 ↔ 작업정보 GAMME 교차 검수")
+        st.subheader("포장 제품명 일치 여부")
         checks_df = pd.DataFrame(identity_checks)
         overall = (
             checks_df[checks_df["is_primary"]].groupby("file")["status"].apply(
@@ -192,8 +198,8 @@ if st.session_state.get("qa_result"):
                 f"수치 확인이 필요한 문단 {len(numeric_reviews)}건이 있습니다. "
                 "OCR 후보와 PDF 원본을 비교해야 하며 자동 승인되지 않습니다."
             )
-        st.subheader("P1 · 기준 문구 대조 및 자동 검수")
-        st.caption("P1은 기준 데이터와의 일치 여부를 보여주며, 직원의 최종 아트웍 승인을 대체하지 않습니다. 이미지 마크·불완전한 원장 조건은 REVIEW입니다.")
+        st.subheader("문구별 검수 결과")
+        st.caption("기준 문구와 비교한 결과입니다. 검토 필요 항목은 담당자가 원본과 대조해 주세요.")
         try:
             p1_master = load_p0_master()
             p1_matches = match_phrases(grouped, p1_master)
@@ -331,7 +337,7 @@ if st.session_state.get("qa_result"):
                 else:
                     st.info("상세 확인할 추출 문구가 없습니다.")
             st.download_button(
-                "P1 검수 보고서 ZIP 다운로드",
+                "문구 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
                 "artwork_p1_qa_report.zip", mime="application/zip",
                 key="p1_download",
@@ -339,7 +345,7 @@ if st.session_state.get("qa_result"):
         except Exception as p1_exc:
             st.error("P1 검수 오류 (기존 P0 추출은 계속 사용 가능): " + str(p1_exc))
 
-        st.subheader("추출 문구 정리")
+        st.subheader("PDF에서 찾은 전체 문구")
         st.caption("일반 문구는 텍스트 블록·줄 좌표를 기준으로 결합하고, 일부 블록이 나뉜 보증문구·AI 표기·코팅 성능 문구도 이어 붙입니다. 곡선 제품명 및 원본 줄별 결과도 보존합니다.")
         groups_df = pd.DataFrame(grouped)
         st.dataframe(
@@ -351,7 +357,7 @@ if st.session_state.get("qa_result"):
                 df[["file", "page", "korean_text", "status", "warnings", "numeric_review", "pdf_original", "ocr_candidate", "numeric_peer_evidence"]],
                 use_container_width=True, hide_index=True
             )
-        st.subheader("PDF 전체 추출 위치 확인")
+        st.subheader("PDF 문구 위치 확인")
         st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
         view_files = sorted(set(
             [r["file"] for r in rows] + [r["file"] for r in identity_checks]
@@ -483,7 +489,7 @@ if st.session_state.get("qa_result"):
 
 if master is not None:
     with st.expander("기준 데이터·관리자 정보 (문구·규칙·변수)", expanded=False):
-        st.subheader("P0 · Excel 기준 데이터")
+        st.subheader("기준 문구·검수 규칙 관리")
         a, b, c, d = st.columns(4)
         a.metric("문구 수", len(master["phrases"]))
         b.metric("카테고리", len(set(p["category_id"] for p in master["phrases"])))
@@ -505,7 +511,7 @@ if master is not None:
             st.dataframe(pd.DataFrame(master["validation_issues"]),
                          use_container_width=True, hide_index=True)
         st.download_button(
-            "P0 구조화 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
+            "기준 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
             file_name="artwork_rules_p0.json", mime="application/json"
         )
         st.caption("기준 문구 240개를 코드에서 자동 로딩합니다. D229 영문 오타는 수정했으며, 나머지 원문은 유지했습니다. 승인 상태는 별도 확인 대상입니다.")
