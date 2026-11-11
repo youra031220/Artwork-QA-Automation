@@ -248,7 +248,7 @@ if st.session_state.get("qa_result"):
                 st.dataframe(pd.DataFrame(p1_summary), use_container_width=True,
                              hide_index=True)
             tab_matches, tab_rules, tab_unknown, tab_evidence = st.tabs(
-                ["정답 대조", "카테고리별 규칙", "미등록 문구", "PDF 근거"]
+                ["정답 대조", "카테고리별 규칙", "미등록 문구", "근거·상세정보"]
             )
             # Keep internal IDs and coordinate arrays in the evidence panel;
             # the primary tables contain only actionable reviewer information.
