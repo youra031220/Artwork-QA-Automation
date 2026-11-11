@@ -10,6 +10,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
+from embedded_reference import load_master
 
 
 def master():
@@ -43,6 +44,21 @@ def group(text,page=1,damage=False):
                 line_indices=[0],source_coordinates=[
                     dict(bbox=[10,10,90,25],page=page,line_index=0)])
 
+
+class EmbeddedReferenceIntegrationTests(unittest.TestCase):
+    def test_real_reference_can_match_without_workbook_upload(self):
+        source=load_master()
+        self.assertGreaterEqual(len(source["phrases"]),200)
+        sample=next(p for p in source["phrases"]
+                    if p.get("korean_original") and len(p["korean_original"])>=12)
+        entry=group(sample["korean_original"])
+        matched=match_phrases([entry],source)
+        self.assertEqual(len(matched),1)
+        self.assertIn(matched[0]["status"],
+                      ("EXACT_MATCH","AMBIGUOUS_MATCH"))
+        self.assertEqual(matched[0]["extracted"],sample["korean_original"])
+        rules=evaluate_rules(matched,source,"example.pdf")
+        self.assertEqual(len(rules),len(source["rules"]))
 
 class PhraseMatcherTests(unittest.TestCase):
     def test_exact(self):
