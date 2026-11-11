@@ -72,11 +72,11 @@ def evaluate_rules(matches, master, filename, context=None):
             "finding": finding,
             "source_reference": rule.get("source_reference",""),
         })
-    results.extend(_semantic_conflicts(in_file, filename))
+    results.extend(_semantic_conflicts(in_file, filename, context))
     return results
 
 
-def _semantic_conflicts(matches, filename):
+def _semantic_conflicts(matches, filename, context=None):
     """Find hard contradictions independently of fuzzy reference matching."""
     results=[]
     texts=[m["extracted"] for m in matches]
@@ -85,6 +85,22 @@ def _semantic_conflicts(matches, filename):
     positive=[t for t in texts if re.search(r"인덕션\s*(?:사용\s*)?가능|인덕션\s*포함",t)
               and not re.search(r"불가|제외",t)]
     negative=[t for t in texts if re.search(r"인덕션\s*(?:사용\s*)?불가|인덕션\s*제외",t)]
+    context = context or {}
+    original = str(context.get("raw_pdf_text", ""))
+    english_positive = re.findall(
+        r"ALL\s+HOBS\s*\+\s*INDUCTION|TOUS\s+FEUX\s*\+\s*INDUCTION",
+        original, re.I,
+    )
+    english_negative = re.findall(
+        r"ALL\s+HOBS\s+EXCEPT\s+INDUCTION",
+        original, re.I,
+    )
+    # Raw English original can confirm the contradiction even if the Korean
+    # translation has been missed by the extraction path.
+    if english_positive:
+        positive.extend(english_positive)
+    if english_negative:
+        negative.extend(english_negative)
     if positive and negative:
         results.append({
             "file":filename, "rule_id":"P1-HEAT-CONFLICT", "category":"열원",
@@ -94,6 +110,32 @@ def _semantic_conflicts(matches, filename):
             "applicability":"APPLICABLE","status":"FAIL",
             "finding":"인덕션 사용 가능·불가 문구 동시 발견",
             "source_reference":"P1 explicit Korean contradiction",
+        })
+    # Warranty years must belong to explicitly warranty-marked Korean claims.
+    # Unrelated dates, certification periods and separate component coverage
+    # must not produce false hard failures.
+    warranty_matches = []
+    for item in matches:
+        value = item.get("extracted", "")
+        if re.search(r"보증|품질\s*보증", value):
+            years = re.findall(r"(?<!\d)(\d{1,2})\s*년", value)
+            warranty_matches.extend((int(year),value) for year in years)
+    by_year = {}
+    for year,value in warranty_matches:
+        by_year.setdefault(year, []).append(value)
+    if len(by_year)>1:
+        results.append({
+            "file":filename,"rule_id":"P1-WARRANTY-DURATION",
+            "category":"품질보증","rule_type":"CONFLICT",
+            "condition":"동일 보증 범위에서 상충하는 기간 금지",
+            "min_count":0,"max_count":1,
+            "found_occurrences":len(warranty_matches),
+            "distinct_variants":len(by_year),
+            "matched_phrase_ids":[],"review_candidates":list(by_year),
+            "applicability":"UNDETERMINED","status":"REVIEW",
+            "finding":"복수 보증기간 발견 ("+", ".join(map(str,sorted(by_year)))+
+            "년). 동일 부품·보증 범위인지 대조 후 오류 판정",
+            "source_reference":"P1 warranty textual evidence",
         })
     return results
 
