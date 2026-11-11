@@ -22,36 +22,12 @@ st.set_page_config(page_title="아트웍 검수 자동화 — 텍스트 추출",
 st.title("아트웍 검수 자동화")
 st.caption("아트웍 문구 추출 · 한국어 문구와 문맥상 필요한 영문 표기를 함께 추출합니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
+master = None
 try:
     @st.cache_data(show_spinner=False)
     def load_p0_master():
         return load_master()
     master = load_p0_master()
-    st.subheader("P0 · Excel 기준 데이터")
-    a, b, c, d = st.columns(4)
-    a.metric("문구 수", len(master["phrases"]))
-    b.metric("카테고리", len(set(p["category_id"] for p in master["phrases"])))
-    c.metric("규칙 그룹", len(master["rules"]))
-    d.metric("검토 이슈", len(master["validation_issues"]))
-    with st.expander("문구·규칙·변수·데이터 이슈", expanded=False):
-        st.write("**Rule Master**")
-        st.dataframe(pd.DataFrame(master["rules"]), use_container_width=True, hide_index=True)
-        st.write("**Phrase Master**")
-        categories = sorted(set(p["category_id"] for p in master["phrases"]))
-        selected_category = st.selectbox("TYPE 필터", ["전체"] + categories, key="p0_type")
-        phrases = [p for p in master["phrases"] if selected_category == "전체"
-                   or p["category_id"] == selected_category]
-        st.dataframe(pd.DataFrame(phrases), use_container_width=True, hide_index=True)
-        st.write("**Variant Master**")
-        st.dataframe(pd.DataFrame(master["variants"]), use_container_width=True, hide_index=True)
-        st.write("**검토가 필요한 데이터**")
-        st.dataframe(pd.DataFrame(master["validation_issues"]),
-                     use_container_width=True, hide_index=True)
-    st.download_button(
-        "P0 구조화 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
-        file_name="artwork_rules_p0.json", mime="application/json"
-    )
-    st.caption("기준 문구 240개를 코드에서 자동 로딩합니다. D229 영문 오타는 수정했으며, 나머지 원문은 유지했습니다. 승인 상태는 별도 확인 대상입니다.")
 except Exception as exc:
     st.error("내장 검수 기준 로딩 실패: " + str(exc))
 
@@ -504,3 +480,31 @@ if st.session_state.get("qa_result"):
                            file_name="artwork_korean_text.zip", mime="application/zip")
     elif not errors and not identity_checks:
         st.warning("추출 가능한 문구가 없습니다. PDF의 텍스트 레이어를 확인하세요.")
+
+if master is not None:
+    with st.expander("기준 데이터·관리자 정보 (문구·규칙·변수)", expanded=False):
+        st.subheader("P0 · Excel 기준 데이터")
+        a, b, c, d = st.columns(4)
+        a.metric("문구 수", len(master["phrases"]))
+        b.metric("카테고리", len(set(p["category_id"] for p in master["phrases"])))
+        c.metric("규칙 그룹", len(master["rules"]))
+        d.metric("검토 이슈", len(master["validation_issues"]))
+        with st.expander("문구·규칙·변수·데이터 이슈", expanded=False):
+            st.write("**Rule Master**")
+            st.dataframe(pd.DataFrame(master["rules"]), use_container_width=True, hide_index=True)
+            st.write("**Phrase Master**")
+            categories = sorted(set(p["category_id"] for p in master["phrases"]))
+            selected_category = st.selectbox("TYPE 필터", ["전체"] + categories, key="p0_type")
+            phrases = [p for p in master["phrases"] if selected_category == "전체"
+                       or p["category_id"] == selected_category]
+            st.dataframe(pd.DataFrame(phrases), use_container_width=True, hide_index=True)
+            st.write("**Variant Master**")
+            st.dataframe(pd.DataFrame(master["variants"]), use_container_width=True, hide_index=True)
+            st.write("**검토가 필요한 데이터**")
+            st.dataframe(pd.DataFrame(master["validation_issues"]),
+                         use_container_width=True, hide_index=True)
+        st.download_button(
+            "P0 구조화 데이터 JSON", json.dumps(master, ensure_ascii=False, indent=2),
+            file_name="artwork_rules_p0.json", mime="application/json"
+        )
+        st.caption("기준 문구 240개를 코드에서 자동 로딩합니다. D229 영문 오타는 수정했으며, 나머지 원문은 유지했습니다. 승인 상태는 별도 확인 대상입니다.")
