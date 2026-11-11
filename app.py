@@ -250,51 +250,83 @@ if st.session_state.get("qa_result"):
             tab_matches, tab_rules, tab_unknown, tab_evidence = st.tabs(
                 ["정답 대조", "카테고리별 규칙", "미등록 문구", "PDF 근거"]
             )
+            # Keep internal IDs and coordinate arrays in the evidence panel;
+            # the primary tables contain only actionable reviewer information.
+            match_columns = {
+                "file": "파일", "page": "페이지", "extracted": "PDF 추출 문구",
+                "status": "대조 결과", "category": "카테고리",
+                "reference_korean": "기준 국문", "reference_english": "기준 영문",
+                "differences": "차이점", "reason": "검토 사유",
+            }
+            rule_columns = {
+                "category": "카테고리", "rule_type": "검수 조건",
+                "found_occurrences": "발견 횟수",
+                "distinct_variants": "서로 다른 문구 수",
+                "status": "판정", "finding": "검수 결과",
+            }
+            def reviewer_table(records, columns):
+                view = pd.DataFrame(records)
+                return view.reindex(columns=list(columns)).rename(columns=columns)
+
             with tab_matches:
-                st.caption("매칭은 기존 추출 문구를 변경하지 않습니다. UNVERIFIED는 기준 데이터의 승인 상태입니다.")
-                st.dataframe(pd.DataFrame(p1_matches), use_container_width=True,
-                             hide_index=True)
+                st.caption("추출 문구·기준 문구·차이점 중심으로 표시합니다. ID 및 좌표 등은 아래 '근거·상세정보'에서 확인할 수 있습니다.")
+                st.dataframe(
+                    reviewer_table(p1_matches, match_columns),
+                    use_container_width=True, hide_index=True,
+                )
             with tab_rules:
                 if p1_rules:
-                    rule_file = st.selectbox("검수할 PDF", all_files,
-                                             key="p1_rule_file")
-                    relevant_rules = [r for r in p1_rules if r["file"] == rule_file]
-                    st.dataframe(pd.DataFrame(relevant_rules),
-                                 use_container_width=True, hide_index=True)
-                    st.caption("found_occurrences는 기준과 확정 매칭된 횟수입니다. distinct_variants는 서로 다른 정답 유형 수입니다. 기준 미등록·조건 미확정은 REVIEW로 남습니다.")
+                    rule_file = st.selectbox(
+                        "검수할 PDF", all_files, key="p1_rule_file"
+                    )
+                    relevant_rules = [
+                        r for r in p1_rules if r["file"] == rule_file
+                    ]
+                    st.dataframe(
+                        reviewer_table(relevant_rules, rule_columns),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption("발견 횟수는 기준과 확정 매칭된 횟수이며, 서로 다른 문구 수는 중복 인쇄를 제외한 유형 수입니다. 조건 미확정은 REVIEW로 남습니다.")
             with tab_unknown:
-                unknown = [m for m in p1_matches if m["status"] == "UNREGISTERED"]
+                unknown = [
+                    m for m in p1_matches if m["status"] == "UNREGISTERED"
+                ]
                 st.metric("정답 데이터 미등록 문구", len(unknown))
                 if unknown:
-                    st.dataframe(pd.DataFrame(unknown),
-                                 use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        reviewer_table(unknown, {
+                            "file": "파일", "page": "페이지",
+                            "extracted": "미등록 국문",
+                            "reason": "검토 사유",
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
                 else:
-                    st.info("미등록 문구 없음. 다만 OCR 및 문장 연결 오류가 없는지 확인하세요.")
+                    st.info("미등록 문구 없음. OCR 및 문장 연결 오류 여부는 별도 확인하세요.")
             with tab_evidence:
-                options = [
-                    (idx, m) for idx, m in enumerate(p1_matches)
-                    if m.get("source_coordinates")
-                ]
-                if options:
+                st.caption("기본 목록에서 생략한 내부 ID·원장 행 번호·OCR 후보·PDF 좌표를 선택한 문구에 대해서만 보여줍니다.")
+                if p1_matches:
                     pick = st.selectbox(
-                        "PDF 근거 문구 선택", range(len(options)),
+                        "상세 확인할 문구", range(len(p1_matches)),
                         format_func=lambda j: (
-                            f'{options[j][1]["file"]} · p.{options[j][1]["page"]}'
-                            f' · {options[j][1]["status"]} · {options[j][1]["extracted"][:65]}'
+                            f'{p1_matches[j]["file"]} · p.{p1_matches[j]["page"]}'
+                            f' · {p1_matches[j]["status"]} · {p1_matches[j]["extracted"][:65]}'
                         ), key="p1_evidence_item"
                     )
-                    entry = options[pick][1]
+                    entry = p1_matches[pick]
+                    st.write("**PDF 추출 문구:**", entry["extracted"])
+                    st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
+                    st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
+                    st.write("**판정 근거:**", entry["reason"])
+                    if entry.get("differences"):
+                        st.write("**차이점:**", entry["differences"])
                     rectangles = [
-                        pos["bbox"] for pos in entry["source_coordinates"]
+                        pos["bbox"] for pos in entry.get("source_coordinates", [])
                         if pos.get("bbox")
                     ]
                     selected_file = next(
                         (item for item in files if item.name == entry["file"]), None
                     )
-                    st.write("**원본 추출:**", entry["extracted"])
-                    st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
-                    st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
-                    st.write("**판정 근거:**", entry["reason"])
                     if selected_file and rectangles:
                         crop = render_selected_crop(
                             selected_file.getvalue(), int(entry["page"]),
@@ -302,10 +334,29 @@ if st.session_state.get("qa_result"):
                              "status": entry["status"]}
                         )
                         if crop is not None:
-                            st.image(crop, caption="PDF 원본 근거 (강조된 추출 위치)",
-                                     use_container_width=True)
+                            st.image(
+                                crop, caption="PDF 원본 근거 (강조된 추출 위치)",
+                                use_container_width=True,
+                            )
+                    elif not rectangles:
+                        st.info("이 문구의 정확한 PDF 좌표가 없습니다. 원본 파일에서 직접 확인하세요.")
+                    with st.expander("기술 상세정보 · OCR 및 원장 추적", expanded=False):
+                        detail_fields = {
+                            "line_indices": "원본 줄 인덱스",
+                            "source_coordinates": "PDF 근거 좌표",
+                            "ocr_candidates": "OCR 후보",
+                            "phrase_id": "정답 문구 ID",
+                            "rule_id": "규칙 ID",
+                            "source_row": "원장 행 번호",
+                            "candidates": "추가 매칭 후보",
+                            "approval_status": "정답 데이터 승인 상태",
+                        }
+                        for field, title in detail_fields.items():
+                            value = entry.get(field)
+                            if value not in (None, "", []):
+                                st.write(f"**{title}:**", value)
                 else:
-                    st.info("좌표를 가진 추출 문구가 없습니다.")
+                    st.info("상세 확인할 추출 문구가 없습니다.")
             st.download_button(
                 "P1 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
