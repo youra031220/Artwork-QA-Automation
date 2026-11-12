@@ -1,6 +1,7 @@
 """Private-PDF-free rendering tests for image marks and conditional review."""
 import io
 import unittest
+from unittest.mock import patch
 
 import cv2
 import fitz
@@ -82,6 +83,21 @@ class MarkImageTests(unittest.TestCase):
         world=[x for x in findings if x["code"]=="WORLD_NO1"]
         self.assertTrue(world)
         self.assertFalse(any(x["method"]=="image_region_text_anchor" for x in world))
+
+    def test_raster_world_badge_detected_without_native_world_text(self):
+        # A logo flattened into an image has no PDF-native WORLD lettering.
+        pdf=fitz.open()
+        page=pdf.new_page(width=540,height=420)
+        page.draw_rect(fitz.Rect(195,165,310,240),
+                       color=(.9,0,0),fill=(.9,0,0))
+        payload=pdf.tobytes()
+        pdf.close()
+        with patch("pytesseract.image_to_string",
+                   return_value="Tefal WORLD -N'1- IN COOKWARE"):
+            found=detect_pdf_marks(payload,"raster_world.pdf")
+        self.assertTrue(any(x["code"]=="WORLD_NO1"
+                            and x["status"]=="DETECTED"
+                            and "raster" in x["method"] for x in found))
 
     def test_recycling_text_without_disposal_notice_is_review(self):
         pdf=fitz.open()
