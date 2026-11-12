@@ -124,7 +124,7 @@ def image_mark_candidates(page, filename, metadata=None):
                 and re.search(r"COOKWARE",tokens)):
             continue
         # Candidate is centred on WORLD and includes the badge's N1 line.
-        region=fitz.Rect(wx0-14,wy0-18,wx1+44,wy1+66)&page.rect
+        region=fitz.Rect(wx0-7,wy0-8,wx1+9,wy1+28)&page.rect
         pix=page.get_pixmap(clip=region,matrix=fitz.Matrix(2,2),
                             colorspace=fitz.csRGB,alpha=False)
         patch=np.frombuffer(pix.samples,dtype=np.uint8).reshape(
@@ -134,7 +134,7 @@ def image_mark_candidates(page, filename, metadata=None):
                                  np.array((13,255,255),dtype=np.uint8))
         redmask |=cv2.inRange(phsv,np.array((170,90,60),dtype=np.uint8),
                                    np.array((179,255,255),dtype=np.uint8))
-        if cv2.countNonZero(redmask)/redmask.size<.12:
+        if cv2.countNonZero(redmask)/redmask.size<.035:
             continue
         add("WORLD_NO1","세계 1위 엠블럼",
             [region.x0,region.y0,region.x1,region.y1],
