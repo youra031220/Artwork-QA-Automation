@@ -241,14 +241,14 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
     return findings
 
 
-def review_mark_rules(findings, summaries, metadata, filename):
+def review_mark_rules(findings, summaries, metadata, filename, matches=None):
     """Mark/claim conditional checks, with no unproved image absence FAIL."""
     in_file=[f for f in findings if f.get("file")==filename]
     native=" ".join(line.get("text","") for s in summaries
                     if s.get("file")==filename
                     for line in s.get("raw_evidence",[]))
-    ko=" ".join(s.get("korean_text","") for s in summaries
-                if s.get("file")==filename)
+    ko=" ".join(str(m.get("extracted","")) for m in (matches or [])
+                if m.get("file")==filename)
     product=next((m for m in metadata if m.get("file")==filename),{})
     results=[]
     for code,label in MARKS:
@@ -257,6 +257,10 @@ def review_mark_rules(findings, summaries, metadata, filename):
         hits=[f for f in in_file if f["code"]==code]
         definite=[f for f in hits if f["status"]=="DETECTED"]
         status="OK" if definite and code=="TEFAL_COMMITMENTS_QR" else "REVIEW"
+        # A verified raster world badge plus printed Euromonitor footnote
+        # satisfies only logo/source co-presence, not the year-value QA.
+        if definite and code=="WORLD_NO1" and "Euromonitor" in native+" "+ko:
+            status="OK"
         if definite:
             finding=label+" 이미지 발견"
         elif hits:
@@ -267,7 +271,7 @@ def review_mark_rules(findings, summaries, metadata, filename):
             if not re.search(r"적절한\s*분리\s*배출",native+ko):
                 finding+=" · 한국어 분리배출 안내 문구 확인 필요"
         if code=="WORLD_NO1" and hits:
-            if "Euromonitor" not in native:
+            if "Euromonitor" not in native+" "+ko:
                 finding+=" · 세계 1위 출처 각주 확인 필요"
         if code=="INDUCTION" and not re.search(r"\bINDUCTION\b|인덕션",native,re.I):
             continue
