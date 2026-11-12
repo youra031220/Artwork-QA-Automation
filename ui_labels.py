@@ -45,7 +45,7 @@ def readable_ocr_review(match):
     import re
     from difflib import SequenceMatcher
     original = str(match.get("extracted") or "")
-    if match.get("status") != "OCR_REVIEW" or "\ufffd" not in original:
+    if "\ufffd" not in original:
         return original
     anchor = re.sub(r"[^가-힣]", "", original)
     candidates = match.get("ocr_candidates") or []
@@ -54,10 +54,10 @@ def readable_ocr_review(match):
     for item in candidates:
         candidate = item.get("text", "") if isinstance(item, dict) else str(item)
         korean = re.sub(r"[^가-힣]", "", candidate)
-        if len(korean) < 6 or len(korean) < len(anchor)*0.6:
+        if len(korean) < 6 or len(korean) < len(anchor)*0.85:
             continue
         similarity = SequenceMatcher(None, anchor, korean).ratio()
-        if similarity > score and similarity >= .58:
+        if similarity > score and similarity >= .78:
             best,score = candidate,similarity
     if best:
         return re.sub(r"\s+", " ", best).strip()
