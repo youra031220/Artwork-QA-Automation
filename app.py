@@ -20,6 +20,7 @@ from document_policy import (evaluate_document_policy, compare_range_messages,
                              evaluate_bilingual_values, evaluate_recycling_exclusivity)
 from policy_ui import render_policy_status
 from mark_image_detector import detect_pdf_marks, review_mark_rules, preview_mark
+from numeric_citation import repair_korean_world_years
 import io
 import zipfile
 import json
@@ -181,6 +182,9 @@ if st.session_state.get("qa_result"):
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
         grouped = recover_damaged_warranty(
+            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
+        )
+        grouped = repair_korean_world_years(
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
         grouped = ensure_group_coverage(grouped, rows)
