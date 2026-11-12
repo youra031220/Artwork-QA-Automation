@@ -166,3 +166,130 @@ def combine_damaged_coating(groups, rows, pdf_contents, dpi=350):
         for doc in documents.values():
             doc.close()
     return [replacements.get(i,g) for i,g in enumerate(groups) if i not in removed]
+
+
+
+def _ocr_attribution(page, bbox, dpi=350):
+    """Read printed Korean No.1 attribution years in a small PDF crop.
+
+    Other language footnotes can share the rectangle. Anchor the year pair
+    *after* Korean '세계판매 1위', not to the preceding Turkish source.
+    """
+    region=fitz.Rect(bbox.x0-3,bbox.y0-3,bbox.x1+4,bbox.y1+4) & page.rect
+    if region.is_empty:
+        return None
+    pix=page.get_pixmap(clip=region,
+                        matrix=fitz.Matrix(dpi/72,dpi/72),alpha=False)
+    image=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
+    image=ImageOps.expand(ImageOps.autocontrast(ImageOps.grayscale(image)),
+                           border=30,fill=255)
+    for psm in (6,11):
+        try:
+            text=pytesseract.image_to_string(
+                image,lang="kor+eng",config=f"--oem 3 --psm {psm}")
+        except pytesseract.TesseractError:
+            continue
+        normalized=re.sub(r"\s+"," ",text)
+        start=re.search(r"세계\s*판매\s*1\s*위",normalized)
+        if not start:
+            continue
+        years=re.findall(r"(?<!\d)(20\d{2})(?!\d)",normalized[start.end():])
+        if len(years)>=2:
+            return years[0],years[1]
+    return None
+
+
+def combine_damaged_attribution(groups, pdf_contents, dpi=350):
+    """Merge adjacent Korean Euromonitor lines into one provisional reading.
+
+    Exactly the OCR-observed 1 and years are used; source text is retained.
+    No fuzzy reference dictionary is used to invent missing numbers.
+    """
+    by_page={}
+    for i,g in enumerate(groups):
+        by_page.setdefault((g.get("file"),g.get("page")),[]).append((i,g))
+    remove=set()
+    replace={}
+    docs={}
+    try:
+        for (filename,page_num),items in by_page.items():
+            if filename not in pdf_contents:
+                continue
+            heads=[(i,g) for i,g in items
+                   if "테팔 세계판매" in g.get("paragraph","")
+                   and i not in remove]
+            for head_idx,head in heads:
+                head_bbox=_bounds(head)
+                if head_bbox is None:
+                    continue
+                nearby=[]
+                for j,g in items:
+                    if j==head_idx or j in remove:
+                        continue
+                    text=g.get("paragraph","")
+                    bbox=_bounds(g)
+                    if (bbox is not None and _close(head_bbox,bbox)
+                        and any(t in text for t in ("에디션","주방용품.","브랜드 매출","기준"))
+                        and bbox.y0 >= head_bbox.y0 - 5):
+                        nearby.append((j,g))
+                nearby.sort(key=lambda item: _bounds(item[1]).y0)
+                nearby=nearby[:2]
+                if not nearby or not any("기준" in item[1]["paragraph"]
+                                         for item in nearby):
+                    continue
+                parts=[head]+[g for i,g in nearby]
+                original=" ".join(g["paragraph"] for g in parts)
+                if ("Euromonitor" not in original or "기준" not in original
+                    or "\ufffd" not in original):
+                    continue
+                joined=head_bbox
+                for part in parts[1:]:
+                    joined |= _bounds(part)
+                if joined.width>370 or joined.height>90:
+                    continue
+                try:
+                    if filename not in docs:
+                        docs[filename]=fitz.open(
+                            stream=pdf_contents[filename],filetype="pdf")
+                    page=docs[filename][int(page_num)-1]
+                    years=_ocr_attribution(page,joined,dpi=dpi)
+                except (ValueError,IndexError,fitz.FileDataError):
+                    continue
+                if not years:
+                    continue
+                edition,baseyear=years
+                # A matching edition year is required in the original PDF
+                # text as well. The sales year is still OCR-only and REVIEW.
+                if edition not in original:
+                    continue
+                candidate=re.sub(r"\ufffd{1,2}\s*위","1위",original,count=1)
+                candidate=re.sub(r"\ufffd{2,6}\s*기준",
+                                 baseyear+" 기준",candidate,count=1)
+                if candidate==original:
+                    continue
+                result=dict(head)
+                result["paragraph"]=re.sub(r"\s+"," ",candidate).strip()
+                result["original_paragraph"]=original
+                result["type"]="OCR 각주 연결"
+                result["status"]="OCR 세계 1위 각주 · 연도 원본 확인 필요"
+                result["numeric_review"]=True
+                result["ocr_reconstructed"]=True
+                result["ocr_candidates"]=[
+                    c for part in parts for c in part.get("ocr_candidates",[])
+                ]+[{"text":candidate,"source":"국문 세계 1위 각주 원본 PDF OCR"}]
+                result["warnings"]=list(dict.fromkeys(
+                    [w for part in parts for w in part.get("warnings",[])]
+                    + ["1위·매출 기준연도는 OCR 확인 후보이며 승인된 정답이 아닙니다."]
+                ))
+                for key in ("source_coordinates","line_indices",
+                            "raw_evidence_ids","numeric_tokens"):
+                    result[key]=[
+                        item for part in parts for item in part.get(key,[])
+                    ]
+                result["line_count"]=sum(p.get("line_count",0) for p in parts)
+                replace[head_idx]=result
+                remove.update(j for j,g in nearby)
+    finally:
+        for doc in docs.values():
+            doc.close()
+    return [replace.get(i,g) for i,g in enumerate(groups) if i not in remove]
