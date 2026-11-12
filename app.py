@@ -19,7 +19,7 @@ from english_pairing import find_english_counterpart
 from document_policy import (evaluate_document_policy, compare_range_messages,
                              evaluate_bilingual_values, evaluate_recycling_exclusivity)
 from policy_ui import render_policy_status
-from mark_image_detector import detect_pdf_marks, review_mark_rules, preview_mark
+from mark_image_detector import detect_pdf_marks, review_mark_rules, preview_mark, MARKS
 from numeric_citation import repair_korean_world_years
 import io
 import zipfile
@@ -285,7 +285,7 @@ if st.session_state.get("qa_result"):
                 continue
             with st.expander(shown_file(filename) + " · 마크 확인", expanded=False):
                 for rule in findings:
-                    st.write("**" + rule["rule_id"].removeprefix("IMG-").replace("_", " ") + "** · " + rule["finding"])
+                    st.write("**" + dict(MARKS).get(rule["rule_id"].removeprefix("IMG-"),"기타 마크") + "** · " + rule["finding"])
                     hits = rule.get("image_evidence", [])
                     if hits:
                         for hit in hits[:2]:
