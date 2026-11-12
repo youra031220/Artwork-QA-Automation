@@ -13,7 +13,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
-from ui_labels import product_labels, display_file_table
+from ui_labels import product_labels, display_file_table, readable_ocr_review
 import io
 import zipfile
 import json
@@ -265,7 +265,11 @@ if st.session_state.get("qa_result"):
                 "status": "판정", "finding": "검수 결과",
             }
             def reviewer_table(records, columns):
-                view = pd.DataFrame(shown_records(records))
+                display = shown_records(records)
+                for entry, source in zip(display, records):
+                    if "extracted" in entry:
+                        entry["extracted"] = readable_ocr_review(source)
+                view = pd.DataFrame(display)
                 return view.reindex(columns=list(columns)).rename(columns=columns)
 
             with tab_matches:
@@ -315,7 +319,11 @@ if st.session_state.get("qa_result"):
                     )
                     entry = p1_matches[pick]
                     st.caption("원본 파일명: " + entry["file"])
-                    st.write("**PDF 추출 문구:**", entry["extracted"])
+                    st.write("**검수 화면 문구:**", readable_ocr_review(entry))
+                    if entry.get("original_extracted") != entry["extracted"]:
+                        st.write("**PDF 원본 추출 (수정 전):**", entry["original_extracted"])
+                    elif entry.get("status") == "OCR_REVIEW":
+                        st.write("**PDF 원본 추출 (OCR 미확정):**", entry["extracted"])
                     st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
                     st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
                     st.write("**판정 근거:**", entry["reason"])
