@@ -1,140 +1,173 @@
-"""Find English printed in PDF artwork, including wrapped/rotated text.
+"""Source-backed English phrase retrieval across fragmented PDF artwork text.
 
-The master only supplies a search target. Returned English always consists of
-literal native PDF glyphs. Unknown English is never filled from the master.
+The master is a *search template*, not extracted content. Every returned
+character must originate from literal PDF text. Unicode format marks,
+punctuation/spacing variation, and independent 202X year placeholders are
+handled without inventing actual wording or numbers.
 """
 import re
-from itertools import permutations
+import unicodedata
 
 _SCRIPT = re.compile(r"[가-힣\u0e00-\u0e7f\u0400-\u052f\u0600-\u06ff]")
 _WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
+_NUMERIC_FRAGMENT = re.compile(r"^(?:\(?\d{1,4}(?:[.,]\d+)?%?\)?|N[°º]?\d+)$", re.I)
 
 
 def _reference_english(text):
     text = str(text or "").strip()
     if not text:
         return ""
-    # The reference workbook sometimes says "English or Korean". That is
-    # editorial guidance, not one full English artwork sentence.
     text = re.split(r"\s+(?:or|또는)\s+", text, maxsplit=1, flags=re.I)[0]
     if _SCRIPT.search(text):
         return ""
     return text
 
 
-def _pattern(value):
-    """Allow line wrapping, hyphen/space differences and independent 202X years."""
-    # Exact words and all numeric literals are preserved. 202X is the only
-    # variable year placeholder and matches 2020–2029 independently.
-    tokens = re.split(r"[-\u2010-\u2015\s]+", value.strip())
-    if len(tokens) < 2:
+def _compact_with_offsets(text):
+    """Normalized search characters and their original text offsets."""
+    normalized, offsets = [], []
+    for pos, ch in enumerate(str(text or "")):
+        if unicodedata.category(ch) == "Cf":
+            continue  # Zero-width marks in the workbook and PDF
+        # Keep alphabetic text and numeric values; punctuation is a
+        # formatting separator, except percent which is a meaningful unit.
+        for letter in unicodedata.normalize("NFKC", ch).casefold():
+            if letter.isascii() and (letter.isalnum() or letter == "%"):
+                normalized.append(letter)
+                offsets.append(pos)
+    return "".join(normalized), offsets
+
+
+def _target_pattern(reference):
+    compact, _ = _compact_with_offsets(reference)
+    if len(compact) < 5:
         return None
-    fragments = []
-    for token in tokens:
-        if not token:
-            continue
-        literal = re.escape(token)
-        literal = literal.replace("202X", r"202\d").replace("202x", r"202\d")
-        fragments.append(literal)
-    if len(fragments) < 2:
-        return None
-    return re.compile(
-        r"(?<![A-Za-z0-9])" +
-        r"[-\u2010-\u2015\s]+".join(fragments) +
-        r"(?![A-Za-z0-9])", re.I
-    )
+    return re.compile(re.escape(compact).replace("202x", r"202\d"), re.I)
+
+
+def _source_match(raw, pattern):
+    compact, offsets = _compact_with_offsets(raw)
+    m = pattern.search(compact)
+    if m and offsets:
+        return raw[offsets[m.start()]:offsets[m.end()-1]+1].strip()
+    return ""
+
+
+def _source_prefix(raw, reference):
+    """Get a prefix of the visible text starting at the reference beginning."""
+    compact, offsets = _compact_with_offsets(raw)
+    target, _ = _compact_with_offsets(reference)
+    if len(target) < 5 or not compact:
+        return ""
+    start = compact.find(target[:min(6, len(target))])
+    if start < 0:
+        return ""
+    return raw[offsets[start]:]
 
 
 def _english_line(line):
     value = str(line.get("text") or "").strip()
-    return bool(value and _WORD.search(value) and not _SCRIPT.search(value[:80]))
+    return bool(value and not _SCRIPT.search(value) and
+                (_WORD.search(value) or _NUMERIC_FRAGMENT.fullmatch(value)))
 
 
 def _near(left, right):
-    """Physically adjacent boxes, regardless of PDF extraction line order.
-
-    Artwork uses rotated text and multi-column layouts. The second part can
-    be located ABOVE the first part, so y must not be assumed increasing.
-    """
-    a, b = left.get("bbox"), right.get("bbox")
-    if not a or not b or len(a) != 4 or len(b) != 4:
+    """Connected PDF glyph boxes, irrespective of rotation or extraction order."""
+    a,b=left.get("bbox"),right.get("bbox")
+    if not a or not b or len(a)!=4 or len(b)!=4:
         return False
     xgap = max(0, float(b[0])-float(a[2]), float(a[0])-float(b[2]))
     ygap = max(0, float(b[1])-float(a[3]), float(a[1])-float(b[3]))
-    # Also guard against unrelated neighboring columns and distant captions.
-    center_distance_x = abs((float(a[0])+float(a[2]))/2 -
-                            (float(b[0])+float(b[2]))/2)
-    return xgap <= 24 and ygap <= 32 and center_distance_x <= 200
+    center_x = abs((float(a[0])+float(a[2]))/2-(float(b[0])+float(b[2]))/2)
+    return xgap <= 24 and ygap <= 34 and center_x <= 200
+
+
+def _is_prefix(candidate, target):
+    """A partially printed claim must match the beginning of the template."""
+    have,_ = _compact_with_offsets(candidate)
+    expected,_ = _compact_with_offsets(target)
+    if not have:
+        return False
+    # A 202X in the master stands for one observed digit, independently.
+    # Check this character-by-character so partial lines can be pruned.
+    for a,b in zip(have, expected):
+        if b == "x" and False:  # only use X in an actual 202X context below
+            continue
+        if a != b:
+            break
+    else:
+        return True
+    # Convert both to an anchored regex which works on partially assembled
+    # strings, including partial year text at line boundaries.
+    projected=expected[:len(have)]
+    projected_regex=re.escape(projected).replace("202x",r"202\d")
+    return bool(re.fullmatch(projected_regex,have)) and len(have)<=len(expected)
 
 
 def find_english_counterpart(match, summaries):
-    """Return only source-backed English observed in this file and page.
+    """Find source English on the correct PDF page; never use master as fallback.
 
-    Supports up to four nearby native PDF objects. A returned string is the
-    source substring (not the normalized master string) and may contain line
-    joins, which represent the printed reading order.
+    Handles up to six geometrically connected PDF text objects. Search is
+    prefix-pruned and bounded; unrelated neighboring sentences are excluded.
     """
-    english = _reference_english(match.get("reference_english"))
-    pattern = _pattern(english)
-    if pattern is None:
+    reference=_reference_english(match.get("reference_english"))
+    pattern=_target_pattern(reference)
+    if not pattern:
         return ""
-    lines = [
-        line for summary in summaries
-        if summary.get("file") == match.get("file")
-        and int(summary.get("page", 0)) == int(match.get("page", 0))
-        for line in summary.get("raw_evidence", [])
-        if _english_line(line)
+    lines=[
+        entry for summary in summaries
+        if summary.get("file")==match.get("file")
+        and int(summary.get("page",0))==int(match.get("page",0))
+        for entry in summary.get("raw_evidence",[])
+        if _english_line(entry)
     ]
-    for line in lines:
-        result = pattern.search(line["text"])
-        if result:
-            return result.group(0)
-    # Start only where the beginning of the reference was actually seen.
-    # This prevents searching arbitrary permutations across the whole page.
-    words = _WORD.findall(english)
-    if not words:
-        return ""
-    prefix = re.compile(re.escape(words[0]), re.I)
-    for start_index, start_line in enumerate(lines):
-        if not prefix.search(start_line["text"]):
+    for entry in lines:
+        found=_source_match(entry["text"],pattern)
+        if found:
+            return found
+    # Only start at a PDF line containing the beginning of the reference.
+    # A numeric-only line cannot initiate an unrelated match.
+    max_nodes=6
+    for start_index,entry in enumerate(lines):
+        beginning=_source_prefix(entry["text"],reference)
+        if not beginning:
             continue
-        neighbors = [
-            (j, line) for j, line in enumerate(lines)
-            if j != start_index and _near(start_line, line)
-        ]
-        # Keep a small bounded cluster; actual joined captions/footnotes
-        # are adjacent and only occupy a few native PDF text objects.
-        neighbors.sort(key=lambda item: (
-            abs(float(item[1]["bbox"][1])-float(start_line.get("bbox",[0,0])[1])),
-            abs(float(item[1]["bbox"][0])-float(start_line.get("bbox",[0])[0]))
-        ))
-        neighbors = neighbors[:9]
-        for count in range(1, min(3, len(neighbors)) + 1):
-            for selected in permutations(neighbors, count):
-                chosen = [start_line] + [line for _, line in selected]
-                # Every added line must be adjacent to an already selected
-                # source box; never combine far-away, unrelated phrases.
-                if any(not any(_near(line, prev) for prev in chosen[:i])
-                       for i, line in enumerate(chosen) if i):
+        if not _is_prefix(beginning,reference):
+            continue
+        stack=[(beginning,(start_index,))]
+        visited=set()
+        while stack:
+            current, selected=stack.pop()
+            if (selected,_compact_with_offsets(current)[0]) in visited:
+                continue
+            visited.add((selected,_compact_with_offsets(current)[0]))
+            found=_source_match(current,pattern)
+            if found:
+                return found
+            if len(selected)>=max_nodes:
+                continue
+            tail=lines[selected[-1]]
+            options=[]
+            for ix,newline in enumerate(lines):
+                if ix in selected or not _near(tail,newline):
                     continue
-                candidate = " ".join(line["text"].strip() for line in chosen)
-                found = pattern.search(candidate)
-                if found:
-                    return found.group(0)
+                # The next text object must advance the observed phrase.
+                candidate=current.rstrip()+" "+newline["text"].lstrip()
+                if not _is_prefix(candidate,reference):
+                    continue
+                options.append((ix,candidate))
+            # deterministic search order; the shortest resulting chain wins
+            for ix,candidate in reversed(options):
+                stack.append((candidate,selected+(ix,)))
     return ""
 
 
-def build_reviewer_pairs(matches, summaries, display_text):
-    """Keep the same number of Korean inspection items and source IDs."""
-    return [
-        {
-            "file": match.get("file", ""),
-            "category": match.get("category") or "미분류",
-            "korean_extracted": display_text(match),
-            "english_extracted": find_english_counterpart(match, summaries),
-            "korean_reference": match.get("reference_korean") or "",
-            "english_reference": match.get("reference_english") or "",
-            "match": match,
-        }
-        for match in matches
-    ]
+def build_reviewer_pairs(matches,summaries,display_text):
+    return [{
+        "file":m.get("file",""),"category":m.get("category") or "미분류",
+        "korean_extracted":display_text(m),
+        "english_extracted":find_english_counterpart(m,summaries),
+        "korean_reference":m.get("reference_korean") or "",
+        "english_reference":m.get("reference_english") or "",
+        "match":m,
+    } for m in matches]
