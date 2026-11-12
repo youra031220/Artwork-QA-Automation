@@ -165,8 +165,23 @@ def image_mark_candidates(page, filename, metadata=None):
         inner=light[ch//4:ch*3//4,cw//4:cw*3//4].mean()
         if inner<.055:
             continue
-        add("INDUCTION","인덕션 아이콘",_rect(x,y,cw,ch,scale),
-            "orange_round_ih_visual_candidate")
+        # An orange circle is not proof of an induction icon. Require
+        # printed IH glyphs in the candidate itself before surfacing it.
+        box=_rect(x,y,cw,ch,scale)
+        crop=fitz.Rect(box)&page.rect
+        from PIL import Image
+        import pytesseract
+        pix=page.get_pixmap(clip=crop,matrix=fitz.Matrix(5,5),alpha=False)
+        pic=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
+        try:
+            glyph=pytesseract.image_to_string(pic,lang="eng",
+                       config="--oem 3 --psm 10").upper()
+        except (pytesseract.TesseractError,pytesseract.TesseractNotFoundError):
+            continue
+        if not re.search(r"(?<![A-Z])IH(?![A-Z])",glyph):
+            continue
+        add("INDUCTION","인덕션 아이콘",box,
+            "orange_ih_glyph_visual_candidate")
     return results
 
 
