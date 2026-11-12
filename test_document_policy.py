@@ -1,6 +1,7 @@
 import unittest
 from document_policy import (evaluate_document_policy, compare_range_messages,
     evaluate_bilingual_values, evaluate_recycling_exclusivity)
+from policy_ui import render_policy_status
 
 
 def row(text, filename="sample.pdf", category="", status="EXACT_MATCH"):
@@ -121,6 +122,27 @@ class CorrectionPolicyTests(unittest.TestCase):
     def test_single_recycling_notice_containing_exclusion_is_not_conflict(self):
         mm=[row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능 (유리뚜껑 제외).")]
         self.assertEqual(evaluate_recycling_exclusivity(mm,[],"sample.pdf"),[])
+
+    def test_real_legacy_phrase_is_flagged_in_review_table(self):
+        matches=[row(self.OLD)]
+        findings=self.evaluate([self.OLD],["ALL HOBS EXCEPT INDUCTION"])
+        verdict,issue=render_policy_status(matches[0],findings,"확인 필요","")
+        self.assertEqual(verdict,"수정 필요")
+        self.assertIn("가스레인지",issue)
+
+    def test_unrelated_phrase_is_not_marked_as_legacy_error(self):
+        findings=self.evaluate([self.OLD],["ALL HOBS EXCEPT INDUCTION"])
+        verdict,issue=render_policy_status(row("제품에 대한 주의사항"),
+                                            findings,"기준 문구 일치","")
+        self.assertEqual(verdict,"기준 문구 일치")
+        self.assertEqual(issue,"")
+
+    def test_edition_source_row_shows_specific_error(self):
+        ko="Euromonitor International Limited, Home and Garden 2025 에디션, 2025 기준"
+        findings=self.evaluate([ko],["Euromonitor International Limited, Home and Garden 2026 edition, 2025 data."])
+        verdict,issue=render_policy_status(row(ko),findings,"확인 필요","")
+        self.assertEqual(verdict,"수정 필요")
+        self.assertIn("2026",issue)
 
     def test_product_isolation_across_two_uploaded_documents(self):
         matches=[row(self.OLD,"first.pdf"),row(self.NEW,"second.pdf")]
