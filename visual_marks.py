@@ -144,77 +144,55 @@ def image_mark_candidates(page, filename, metadata=None):
             [region.x0,region.y0,region.x1,region.y1],
             "native_world_n1_cookware_on_red_panel","DETECTED")
 
-    # MADE IN FRANCE: two small BLUE/RED bars on a pale badge with FRANCE
-    # underneath. Manufacturer addresses elsewhere on the page are ignored.
-    country=metadata.get("manufacturing_country")
-    if country=="FRANCE":
-        from PIL import Image
-        import pytesseract
-        blue=cv2.inRange(hsv,np.array((96,120,115),dtype=np.uint8),
-                             np.array((135,255,255),dtype=np.uint8))
-        redbar=red
-        blue_contours,_=cv2.findContours(blue,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-        red_contours,_=cv2.findContours(redbar,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-        bars=[]
-        for contour in red_contours:
-            rx,ry,rw,rh=cv2.boundingRect(contour)
-            if 7<=rw<=55 and 2<=rh<=13:
-                bars.append((rx,ry,rw,rh))
-        for contour in blue_contours:
-            bx,by,bw,bh=cv2.boundingRect(contour)
-            if not (7<=bw<=55 and 2<=bh<=13 and bw/bh>=2):
-                continue
-            partners=[bar for bar in bars if (
-                (4<=bar[0]-(bx+bw)<=55 and abs(bar[1]-by)<=6)
-                or (abs(bar[0]-bx)<=10 and 0<=bar[1]-(by+bh)<=18))
-                and .55<=bar[2]/bw<=1.65]
-            for rx,ry,rw,rh in partners[:2]:
-                bounds=fitz.Rect(
-                    max(0,(bx-14)/scale),max(0,(by-26)/scale),
-                    min(page.rect.x1,(max(rx+rw,bx+bw)+15)/scale),
-                    min(page.rect.y1,(max(by+bh,ry+rh)+52)/scale))
-                pix=page.get_pixmap(clip=bounds,matrix=fitz.Matrix(5,5),alpha=False)
-                patch=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
-                try:
-                    label=pytesseract.image_to_string(patch,lang="eng",
-                                   config="--oem 3 --psm 6").upper()
-                except pytesseract.TesseractError:
-                    continue
-                if "FRANCE" not in label:
-                    continue
-                add("MADE_IN_FRANCE","Made in France 배지",
-                    [bounds.x0,bounds.y0,bounds.x1,bounds.y1],
-                    "blue_red_france_badge_pixels","DETECTED")
+    # France badge: detect the actual compact FABRIQUÉ EN / FRANCE
+    # typography, not a manufacturer address or barcode.
+    words=page.get_text("words")
+    for word in words:
+        if word[4].strip().upper()!="FRANCE":
+            continue
+        x0,y0,x1,y1=word[:4]
+        nearby=" ".join(z[4] for z in words if
+            abs(z[1]-y0)<38 and abs(z[0]-x0)<65).upper()
+        if not ("FABRIQU" in nearby or "MADE IN" in nearby):
+            continue
+        bounds=fitz.Rect(x0-12,y0-32,x1+12,y1+8)&page.rect
+        pix=page.get_pixmap(clip=bounds,matrix=fitz.Matrix(3,3),
+                            colorspace=fitz.csRGB,alpha=False)
+        patch=np.frombuffer(pix.samples,dtype=np.uint8).reshape(
+            pix.height,pix.width,3)
+        phsv=cv2.cvtColor(patch,cv2.COLOR_RGB2HSV)
+        blue=cv2.inRange(phsv,np.array((95,65,55),dtype=np.uint8),
+                              np.array((140,255,255),dtype=np.uint8))
+        if cv2.countNonZero(blue)<8:
+            continue
+        add("MADE_IN_FRANCE","Made in France 배지",
+            [bounds.x0,bounds.y0,bounds.x1,bounds.y1],
+            "france_label_blue_flag_raster","DETECTED")
 
-    # IH badge: use the native lettering when available, and only accept
-    # a small, nearly circular warm-coloured badge around the glyph.
-    # Plain "ALL HOBS + INDUCTION" is not a logo.
-    warm=cv2.inRange(hsv,np.array((0,90,55),dtype=np.uint8),
-                         np.array((25,255,255),dtype=np.uint8))
-    warm |= cv2.inRange(hsv,np.array((170,90,55),dtype=np.uint8),
-                           np.array((179,255,255),dtype=np.uint8))
-    for x,y,cw,ch,area in _solid_color_regions(
-            cv2.morphologyEx(warm,cv2.MORPH_CLOSE,np.ones((3,3),np.uint8)),12,150):
-        if not (.82<=cw/ch<=1.19 and .40<=area/(cw*ch)<=.89):
+    # IH circular badge: find local 'IH' text, then verify a compact
+    # warm-coloured disc. This excludes standalone induction claims.
+    for word in words:
+        if word[4].strip().upper()!="IH":
             continue
-        box=_rect(x,y,cw,ch,scale)
-        native=_words_inside(page,box).upper()
-        # If the flattened logo has no native text, OCR the circular badge.
-        from PIL import Image,ImageOps,ImageEnhance
-        import pytesseract
-        crop=fitz.Rect(box)&page.rect
-        pix=page.get_pixmap(clip=crop,matrix=fitz.Matrix(7,7),alpha=False)
-        pic=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
-        try:
-            glyph=pytesseract.image_to_string(
-                ImageEnhance.Contrast(ImageOps.grayscale(pic)).enhance(2),
-                lang="eng",config="--oem 3 --psm 11").upper()
-        except (pytesseract.TesseractError,pytesseract.TesseractNotFoundError):
-            glyph=""
-        if not re.search(r"(?<![A-Z])I\\s*H(?![A-Z])",native+" "+glyph):
+        x0,y0,x1,y1=word[:4]
+        side=max(18,(y1-y0)*3.0)
+        center=((x0+x1)/2,(y0+y1)/2)
+        bounds=fitz.Rect(center[0]-side,center[1]-side,
+                         center[0]+side,center[1]+side)&page.rect
+        pix=page.get_pixmap(clip=bounds,matrix=fitz.Matrix(3,3),
+                            colorspace=fitz.csRGB,alpha=False)
+        patch=np.frombuffer(pix.samples,dtype=np.uint8).reshape(
+            pix.height,pix.width,3)
+        phsv=cv2.cvtColor(patch,cv2.COLOR_RGB2HSV)
+        warm=cv2.inRange(phsv,np.array((0,85,55),dtype=np.uint8),
+                              np.array((25,255,255),dtype=np.uint8))
+        warm |=cv2.inRange(phsv,np.array((170,85,55),dtype=np.uint8),
+                                np.array((179,255,255),dtype=np.uint8))
+        if cv2.countNonZero(warm)/warm.size<.10:
             continue
-        add("INDUCTION","인덕션 아이콘",box,
-            "circular_warm_ih_badge","CANDIDATE")
+        add("INDUCTION","인덕션 아이콘",
+            [bounds.x0,bounds.y0,bounds.x1,bounds.y1],
+            "ih_label_inside_warm_badge","DETECTED")
     return results
 
 
