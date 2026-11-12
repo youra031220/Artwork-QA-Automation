@@ -260,6 +260,46 @@ class LongPhraseTableTests(unittest.TestCase):
 
 
 class EnglishEvidenceTests(unittest.TestCase):
+    def test_unregistered_korean_sturdy_handle_links_actual_printed_english(self):
+        match={"file":"mint.pdf","page":1,"extracted":"무거운 무게에도 안정적인 견고한 손잡이",
+               "reference_english":""}
+        evidence=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"UP TO 100KG - ROBUST HANDLE","bbox":[800,481,1019,503]}
+        ]}]
+        self.assertEqual(find_english_counterpart(match,evidence),
+                         "UP TO 100KG - ROBUST HANDLE")
+
+    def test_unregistered_korean_three_times_coating_has_printed_english(self):
+        match={"file":"mint.pdf","page":1,
+               "extracted":"테팔 기본 코팅 대비 최대 3배 더 오래가는 코팅",
+               "reference_english":""}
+        evidence=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"UP TO","bbox":[959,753,976,763]},
+            {"text":"3X ","bbox":[955,745,1050,834]},
+            {"text":"MORE RESISTANT THAN TEFAL BASIC COATING",
+             "bbox":[927,819,1072,829]},
+        ]}]
+        self.assertEqual(find_english_counterpart(match,evidence),
+                         "UP TO 3X MORE RESISTANT THAN TEFAL BASIC COATING")
+
+    def test_unregistered_korean_saucepan_lid_is_pdf_backed(self):
+        match={"file":"mint.pdf","page":1,
+               "extracted":"편수냄비(뚜껑포함)","reference_english":""}
+        evidence=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"SAUCEPAN WITH LID ","bbox":[967,955,1031,965]},
+        ]}]
+        self.assertEqual(find_english_counterpart(match,evidence),
+                         "SAUCEPAN WITH LID")
+
+    def test_unregistered_hint_never_invents_missing_english(self):
+        match={"file":"mint.pdf","page":1,
+               "extracted":"무거운 무게에도 안정적인 견고한 손잡이",
+               "reference_english":""}
+        evidence=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"EASY TO USE","bbox":[800,481,1019,503]},
+        ]}]
+        self.assertEqual(find_english_counterpart(match,evidence),"")
+
     def test_mint_real_printed_space_claim_uses_five_native_objects(self):
         # Mint Calm PDF splits one visible claim into FIVE independent glyphs.
         match={"file":"mint.pdf","page":1,
