@@ -56,7 +56,7 @@ def _source_match(raw, pattern, reference=""):
     ref = str(reference or "").strip()
     if ref.startswith("(") and begin > 0 and raw[begin-1] == "(":
         begin -= 1
-    if ref.endswith(".") and end < len(raw) and raw[end] == ".":
+    if ref.endswith((".", ")")) and end < len(raw) and raw[end] == ref[-1]:
         end += 1
     return raw[begin:end].strip()
 
