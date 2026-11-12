@@ -90,13 +90,25 @@ def image_mark_candidates(page, filename, metadata=None):
         if not (.60<cw/ch<3.5 and area/(cw*ch)>.46):
             continue
         box=_rect(x,y,cw,ch,scale)
-        # Find actual glyphs inside or immediately above the red badge.
+        # The logo is often a flattened image, so page.get_textbox()
+        # returns nothing. Read glyphs within the red raster emblem itself.
+        from PIL import Image
+        import pytesseract
         region=fitz.Rect(box)
-        text=_words_inside(page,fitz.Rect(region.x0-8,region.y0-22,region.x1+8,region.y1+8)).upper()
-        if not (re.search(r"\bWORLD\b",text) and
-                re.search(r"N\s*[°ºO]?\s*1|NO\s*1",text)):
+        crop=fitz.Rect(region.x0-9,region.y0-10,
+                       region.x1+9,region.y1+10)&page.rect
+        px=page.get_pixmap(clip=crop,matrix=fitz.Matrix(5,5),alpha=False)
+        pic=Image.frombytes("RGB",(px.width,px.height),px.samples)
+        try:
+            text=pytesseract.image_to_string(pic,lang="eng",
+                       config="--oem 3 --psm 6").upper()
+        except pytesseract.TesseractError:
             continue
-        add("WORLD_NO1","세계 1위 엠블럼",box,"world_red_panel_with_printed_title")
+        if not (re.search(r"N[°º'’\s\\-]{0,3}1",text)
+                and re.search(r"WORLD|MONDIAL|COOKWARE",text)):
+            continue
+        add("WORLD_NO1","세계 1위 엠블럼",box,
+            "world_red_panel_verified_by_raster_text","DETECTED")
 
     # MADE IN FRANCE: compact light badge with French tricolor and word FRANCE.
     # Test a small surrounding rectangle rather than text at any location.
