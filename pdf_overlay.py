@@ -101,6 +101,8 @@ def numeric_display_label(text, status, numeric_review=False, numeric_peers=None
         return "수치 포함"
     if re.search(r"\ufffd{1,6}\s*(?:%|/|배|년|위)", text):
         return "수치 포함"
+    if re.search(r"(?<!\w)\d{1,4}\s*&", text):
+        return "수치 포함"
     if numeric_tokens(text) or numeric_peers:
         return "수치 포함"
     return ""
