@@ -66,8 +66,12 @@ def image_mark_candidates(page, filename, metadata=None):
     # within the green disc rather than relying on a green contour alone.
     green=cv2.inRange(hsv,np.array((30,50,25),dtype=np.uint8),
                          np.array((96,255,248),dtype=np.uint8))
-    green=cv2.morphologyEx(green,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
-    for x,y,cw,ch,area in _solid_color_regions(green,12,210):
+    # Thin green dielines can connect the true recycling disc to the entire
+    # carton outline. Opening FIRST disconnects these 1px paths; closing
+    # afterwards restores the disc. Verified against Mint Calm and Ruby PDFs.
+    green=cv2.morphologyEx(green,cv2.MORPH_OPEN,np.ones((2,2),np.uint8))
+    green=cv2.morphologyEx(green,cv2.MORPH_CLOSE,np.ones((3,3),np.uint8))
+    for x,y,cw,ch,area in _solid_color_regions(green,12,95):
         if not (.76<cw/ch<1.25 and .34<area/(cw*ch)<.94):
             continue
         disc=hsv[y:y+ch,x:x+cw]
