@@ -11,7 +11,7 @@ from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
 from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review
-from ocr_review import combine_damaged_coating
+from ocr_review import combine_damaged_coating, combine_damaged_attribution
 from unittest.mock import patch
 import fitz
 from embedded_reference import load_master
@@ -100,6 +100,35 @@ class DamagedCoatingReviewTests(unittest.TestCase):
         with patch("ocr_review._ocr_coating",return_value=None):
             result=combine_damaged_coating(groups,rows,{"sample.pdf":payload})
         self.assertEqual(result,groups)
+
+
+class EuromonitorOCRReviewTests(unittest.TestCase):
+    def test_fragmented_2026_2025_attribution_is_one_review_entry(self):
+        doc=fitz.open()
+        doc.new_page(width=1300,height=1800)
+        pdf=doc.tobytes()
+        doc.close()
+        texts=[
+            "테팔 세계판매 �위 주방용품. Euromonitor International Limited, Home and Garden 2026",
+            "에디션, 주방용품 카테고리 브랜드 매출, ���� 기준",
+        ]
+        groups=[{
+            "file":"sample.pdf","page":1,"paragraph":value,
+            "line_indices":[i],"line_count":1,"warnings":[],
+            "source_coordinates":[{"bbox":[700,1400+9*i,930,1420+9*i]}],
+            "ocr_candidates":[],"raw_evidence_ids":[str(i)],
+            "numeric_tokens":[],
+        } for i,value in enumerate(texts)]
+        with patch("ocr_review._ocr_attribution",return_value=("2026","2025")):
+            final=combine_damaged_attribution(groups,{"sample.pdf":pdf})
+        self.assertEqual(len(final),1)
+        self.assertIn("세계판매 1위",final[0]["paragraph"])
+        self.assertIn("2025 기준",final[0]["paragraph"])
+        self.assertTrue(final[0]["numeric_review"])
+        self.assertIn("����",final[0]["original_paragraph"])
+        with patch("ocr_review._ocr_attribution",return_value=None):
+            no_ocr=combine_damaged_attribution(groups,{"sample.pdf":pdf})
+        self.assertEqual(no_ocr,groups)
 
 
 class ReviewerDisplayTests(unittest.TestCase):
