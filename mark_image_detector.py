@@ -278,11 +278,22 @@ def review_mark_rules(findings, summaries, metadata, filename, matches=None):
             if not confirmed:
                 status="REVIEW"
         if code=="INDUCTION":
-            # An IH logo cannot be inferred from ALL HOBS text.
-            if re.search(r"ALL\\s+HOBS\\s+EXCEPT\\s+INDUCTION|인덕션\\s*사용\\s*불가",all_text,re.I):
-                if hits: notes.append("인덕션 사용 불가 문구와 IH 마크 후보 충돌 · 검토")
+            # Explicit exclusion is a valid NOT_APPLICABLE pass, not a
+            # missing-logo review. This applies even if no logo was detected.
+            excluded=bool(re.search(
+                r"ALL\\s+HOBS\\s+EXCEPT\\s+INDUCTION|"
+                r"인덕션\\s*사용\\s*불가|"
+                r"except\\s+induction",all_text,re.I))
+            if excluded and not hits:
+                status="OK"
+                notes=["인덕션 사용 불가 제품 · IH 마크 불필요 (정상)"]
+            elif excluded and hits:
+                status="REVIEW"
+                notes.append("인덕션 사용 불가인데 IH 이미지 후보 검출 · 충돌 확인")
             elif re.search(r"ALL\\s+HOBS\\s*\\+\\s*INDUCTION",all_text,re.I):
-                notes.append("인덕션 사용 가능 문구 확인 · IH 로고는 별도 이미지 검증")
+                notes.append("인덕션 사용 가능 문구 확인 · IH 로고 별도 확인")
+        if code=="INDUCTION_DISABLED_SENTINEL":
+            pass
         if code=="RECYCLING" and confirmed:
             variants=[
                 bool(re.search(r"적절한\\s*분리배출\\s*및\\s*적합한\\s*시설에서\\s*처리\\s*시?\\s*재활용\\s*가능\\.",all_text)),
@@ -316,7 +327,7 @@ def review_mark_rules(findings, summaries, metadata, filename, matches=None):
             min_count=1 if code=="MADE_IN_FRANCE" else 0,max_count=1,
             found_occurrences=len(definite),distinct_variants=len(hits),
             matched_phrase_ids=[],review_candidates=[],
-            applicability="APPLICABLE" if confirmed else "UNDETERMINED",
+            applicability=("NOT_APPLICABLE" if code=="INDUCTION" and status=="OK" and not hits else ("APPLICABLE" if confirmed else "UNDETERMINED")),
             status=status,
             finding=label+(" 이미지 확인" if confirmed else " 이미지 미확인")+" · "+" · ".join(notes),
             source_reference="PDF raster + Excel/meeting criteria",
