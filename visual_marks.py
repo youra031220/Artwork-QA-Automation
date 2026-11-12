@@ -92,7 +92,7 @@ def image_mark_candidates(page, filename, metadata=None):
         box=_rect(x,y,cw,ch,scale)
         # Find actual glyphs inside or immediately above the red badge.
         region=fitz.Rect(box)
-        text=_words_inside(page,region+(-8,-22,8,8)).upper()
+        text=_words_inside(page,fitz.Rect(region.x0-8,region.y0-22,region.x1+8,region.y1+8)).upper()
         if not (re.search(r"\bWORLD\b",text) and
                 re.search(r"N\s*[°ºO]?\s*1|NO\s*1",text)):
             continue
