@@ -159,7 +159,7 @@ def _one(row, master):
     scored.sort(key=lambda t:t[0], reverse=True)
     if not scored:
         return dict(base,status="OCR_REVIEW" if row.get("numeric_review") or DAMAGE.search(actual) else "UNREGISTERED",
-                    reason="기준 데이터에서 일치 문구 미발견")
+                    reason=("글자·숫자 손상으로 정답 대조 보류 · PDF 원본 확인" if row.get("numeric_review") or DAMAGE.search(actual) else "기준 데이터에서 일치 문구 미발견"))
     score,p,v=scored[0]
     others=[x[1]["phrase_id"] for x in scored if x[0]>=score-.02]
     mismatch = (tokens(actual)!=tokens(p["korean_original"])
