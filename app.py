@@ -204,7 +204,7 @@ if st.session_state.get("qa_result"):
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
-        a.metric("추출된 문구 줄", len(rows))
+        a.metric("PDF 한국어 원본 줄", len(rows))
         b.metric("업로드한 제품", len({r["file"] for r in rows}))
         c.metric("추가 확인 항목", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows, raw_summaries=summaries)
@@ -221,7 +221,7 @@ if st.session_state.get("qa_result"):
         )
         grouped = ensure_group_coverage(grouped, rows)
         st.subheader("전체 문구 및 검수 결과")
-        st.caption("제품별로 추출 문구와 검수 결과를 확인합니다. 확인이 필요한 항목은 마지막 열에 표시됩니다.")
+        st.caption("제품별로 모든 한국어 문구를 확인합니다. 여러 줄로 인쇄된 한 문장은 하나로 묶어 표시하며, 확인할 사항은 마지막 열에 표시됩니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
         try:
             p1_master = load_p0_master()
