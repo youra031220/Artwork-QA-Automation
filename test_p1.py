@@ -245,7 +245,7 @@ class LongPhraseTableTests(unittest.TestCase):
             "기준 국문":"엑스트라 라이프 논스틱 코팅",
             "기준 영문":"EXTRA-LIFE NON-STICK",
         }])
-        self.assertIn("PDF 영문 미발견",html)
+        self.assertIn("연결된 영문 문구 미확인",html)
         self.assertEqual(html.count("EXTRA-LIFE NON-STICK"),1)
 
     def test_html_escapes_untrusted_pdf_content(self):
