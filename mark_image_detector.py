@@ -9,6 +9,7 @@ import io
 import re
 
 import fitz
+from visual_marks import clean_and_detect
 
 MARKS = (
     ("TEFAL_COMMITMENTS_QR", "테팔 커미트먼트 QR"),
@@ -210,34 +211,12 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
                     code=code,label=dict(MARKS).get(code,"기타 QR"),
                     status="DETECTED",bbox=item["bbox"],method="qr_pixels",
                     decoded=item["decoded"],finding="QR 코드 이미지 확인됨"))
-            for candidate in _recycling_pixel_candidates(page):
-                findings.append(dict(file=filename,page=page.number+1,
-                    code="RECYCLING",label="재활용 마크",status="CANDIDATE",
-                    bbox=candidate["bbox"],method=candidate["method"],
-                    decoded="",finding="재활용 마크 형태의 녹색 원형 이미지 후보"))
-            for code,label in MARKS[2:]:
-                if code=="MADE_IN_FRANCE" and metadata.get("manufacturing_country")!="FRANCE":
-                    continue
-                # OCR'd logos or labels must still be visually inspected.
-                # We show the rendered region but do NOT promote text
-                # presence into a verified raster logo detection.
-                positions=_anchors(page,ANCHORS[code])
-                for anchor in positions[:5]:
-                    r=fitz.Rect(anchor.x0-35,anchor.y0-35,
-                                anchor.x1+35,anchor.y1+35) & page.rect
-                    if r.is_empty:
-                        continue
-                    is_red_badge=(code=="WORLD_NO1" and
-                                  _world_badge_pixels(page,anchor) and
-                                  bool(re.search(r"WORLD",page.get_textbox(anchor),re.I)))
-                    findings.append(dict(file=filename,page=page.number+1,
-                        code=code,label=label,
-                        status="DETECTED" if is_red_badge else "CANDIDATE",
-                        bbox=[r.x0,r.y0,r.x1,r.y1],
-                        method=("red_world_badge_pixels" if is_red_badge
-                                else "image_region_text_anchor"),decoded="",
-                        finding=("붉은 WORLD 엠블럼 이미지 확인됨" if is_red_badge
-                                 else "관련 인쇄 영역 발견 · 마크 모양 확인 필요")))
+            # Previous code treated textual mentions, barcode fragments and
+            # unrelated red print as logos. Only pixel-based shapes survive.
+            page_hits = [hit for hit in findings if hit["page"]==page.number+1]
+            findings = [hit for hit in findings if hit["page"]!=page.number+1]
+            findings.extend(clean_and_detect(page,filename,page_hits,metadata))
+
     return findings
 
 
