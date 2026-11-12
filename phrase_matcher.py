@@ -99,6 +99,19 @@ def _one(row, master):
     if contains:
         p,v=max(contains,key=lambda pair:len(pair[0]["korean_original"]))
         damaged = bool(row.get("numeric_review") or DAMAGE.search(actual))
+        # The workbook phrase may be only one clause of a longer printed
+        # statement.  Do not mark the entire statement as approved.
+        extra = compact(actual).replace(compact(p["korean_original"]), "", 1)
+        if extra and not re.fullmatch(r"[.,:;()·•\\-]*", extra):
+            return dict(base, status="OCR_REVIEW" if damaged else "TEXT_MISMATCH",
+                        phrase_id=p["phrase_id"], rule_id=v.get("rule_id",""),
+                        category=p["category_id"],
+                        reference_korean=p["korean_original"],
+                        reference_english=p.get("english_original",""),
+                        approval_status=p.get("approval_status","UNVERIFIED"),
+                        source_row=p.get("source_row"),
+                        differences="원장 문구 외 추가 인쇄 내용 존재",
+                        reason="부분 문구만 일치 · 추가 문장을 별도로 대조해야 함")
         return dict(base, status="OCR_REVIEW" if damaged else "NORMALIZED_MATCH",
                     phrase_id=p["phrase_id"], rule_id=v.get("rule_id",""),
                     category=p["category_id"], reference_korean=p["korean_original"],
