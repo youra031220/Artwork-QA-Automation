@@ -10,11 +10,13 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
-from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review
-from ocr_review import combine_damaged_coating, combine_damaged_attribution
+from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review, readable_group, readable_row
+from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from unittest.mock import patch
 import fitz
 from embedded_reference import load_master
+from layout import ensure_group_coverage
+from pdf_overlay import collect_boxes
 
 
 def master():
@@ -47,6 +49,81 @@ def group(text,page=1,damage=False):
     return dict(file="example.pdf",page=page,paragraph=text,numeric_review=damage,
                 line_indices=[0],source_coordinates=[
                     dict(bbox=[10,10,90,25],page=page,line_index=0)])
+
+
+class WarrantyVisibilityTests(unittest.TestCase):
+    def warranty_sample(self):
+        text=("테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 "
+              "�년간 품질 보증 제도를 실시합니다. 제품 내부와 외부에 생긴 "
+              "스크래치 또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.")
+        return dict(
+            file="example.pdf",page=1,paragraph=text,type="일반 문구",
+            line_indices=[0,1,2],line_count=3,
+            source_coordinates=[
+                {"page":1,"line_index":i,"bbox":[902,729+i*9,1135,753+i*9]}
+                for i in range(3)],
+            raw_evidence_ids=["a","b","c"],ocr_candidates=[],warnings=[],
+            numeric_review=True,status="수치 대조 필요 · 원본 확인",
+        )
+
+    def test_warranty_year_restoration_stays_in_both_views(self):
+        document=fitz.open()
+        document.new_page(width=1178,height=2480)
+        pdf=document.tobytes()
+        document.close()
+        original=self.warranty_sample()
+        with patch("ocr_review._ocr_warranty_year",return_value="2"):
+            groups=recover_damaged_warranty([original],{"example.pdf":pdf})
+        self.assertEqual(len(groups),1)
+        self.assertIn("2년간 품질 보증",groups[0]["paragraph"])
+        self.assertNotIn("�",readable_group(groups[0]))
+        self.assertIn("�년간",groups[0]["original_paragraph"])
+        source_line=dict(korean_text="�년간 품질 보증 제도를 실시합니다.",
+                         status="수치 대조 필요 · 원본 확인",ocr_candidate="")
+        self.assertIn("2년간",readable_row(source_line,groups[0]))
+        source_rows=[]
+        for i,part in enumerate([
+            "테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터",
+            "�년간 품질 보증 제도를 실시합니다.",
+            "스크래치 또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다."
+        ]):
+            source_rows.append(dict(
+                file="example.pdf",page=1,korean_text=part,
+                status="수치 대조 필요 · 원본 확인",ocr_candidate="",
+                x0=902,y0=729+i*9,x1=1135,y1=753+i*9,
+                numeric_review=True,curved=False,raw_evidence_ids=[]
+            ))
+        view=collect_boxes(source_rows,groups,[],"example.pdf",1,group_view=True)
+        self.assertEqual(len(view),1)
+        self.assertIn("2년간",view[0]["label"])
+        self.assertNotIn("�",view[0]["label"])
+        lines=collect_boxes(source_rows,groups,[],"example.pdf",1,group_view=False)
+        self.assertIn("2년간",lines[1]["label"])
+        self.assertNotIn("�",lines[1]["label"])
+        self.assertEqual(groups[0]["line_indices"],[0,1,2])
+
+    def test_unreadable_sentence_not_replaced_with_blank_message(self):
+        phrase="제품 내부와 외부에 �긴 스크래치 등이 있습니다."
+        shown=readable_ocr_review({"extracted":phrase,
+                                   "status":"OCR_REVIEW","ocr_candidates":[]})
+        self.assertEqual(shown,"제품 내부와 외부에 □긴 스크래치 등이 있습니다.")
+        self.assertNotEqual(shown,"원본 문구 확인 필요")
+
+    def test_missing_layout_line_is_recovered_without_duplicate(self):
+        raw=[
+            dict(file="example.pdf",page=1,korean_text="첫 번째 문구",
+                 x0=1,y0=1,x1=40,y1=12),
+            dict(file="example.pdf",page=1,korean_text="빠졌던 한국어 문구",
+                 x0=1,y0=20,x1=75,y1=31),
+        ]
+        grouped=[dict(file="example.pdf",page=1,paragraph="첫 번째 문구",
+                      line_indices=[0])]
+        corrected=ensure_group_coverage(grouped,raw)
+        self.assertEqual(len(corrected),2)
+        self.assertEqual(corrected[1]["paragraph"],"빠졌던 한국어 문구")
+        self.assertEqual({i for g in corrected for i in g["line_indices"]},
+                         {0,1})
+        self.assertEqual(len(ensure_group_coverage(corrected,raw)),2)
 
 
 class DamagedCoatingReviewTests(unittest.TestCase):
