@@ -121,6 +121,16 @@ def _qr_candidates(page):
                 continue
             result["anchor"]=token
             unique.append(result)
+    # Labels can be flattened into the artwork or encoded as vector paths;
+    # scan the rendered full page as a fallback instead of declaring no QR.
+    if not unique and page.rect.width*page.rect.height < 4_000_000:
+        for result in _qr_in_crop(page,page.rect,1.8,decoder):
+            box=fitz.Rect(result["bbox"])
+            if any(abs(box.x0-fitz.Rect(old["bbox"]).x0)<8 and
+                   abs(box.y0-fitz.Rect(old["bbox"]).y0)<8 for old in unique):
+                continue
+            result["anchor"]="full_page_visual_scan"
+            unique.append(result)
     return unique
 
 
@@ -203,6 +213,15 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
                 region=fitz.Rect(item["bbox"])
                 commitment=any(_near_anchor(a,region,100) for a in commitment_anchors)
                 care=any(_near_anchor(a,region,95) for a in care_anchors)
+                if not commitment and not care:
+                    # Check native lettering close to the *detected* QR;
+                    # unlike the removed logo logic, this does not create a
+                    # QR candidate from text alone.
+                    around=fitz.Rect(region.x0-80,region.y0-60,
+                                     region.x1+100,region.y1+70)&page.rect
+                    surrounding=page.get_textbox(around).upper()
+                    commitment=bool(re.search(r"COMMITMENTS?",surrounding))
+                    care=bool(re.search(r"USE\s*(?:&|AND)\s*CARE|SCAN",surrounding))
                 # A QR near the commitment banner is not necessarily the
                 # separate use/care QR on another panel.
                 code="TEFAL_COMMITMENTS_QR" if commitment else (
