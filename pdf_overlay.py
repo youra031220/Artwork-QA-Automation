@@ -7,15 +7,12 @@ from extractor import numeric_tokens
 
 COLORS = {
     "한국어": "#2788DA",
-    "OCR 확인": "#1B9E77",
-    "수치 확인": "#D94A4A",
+    "영문": "#1B9E77",
     "수치 포함": "#487C9C",
-    "문장 연결": "#9B6BCC",
     "곡선": "#F39C12",
-    "전면 제품명": "#8A49C7",
-    "GAMME": "#E64C59",
-    "PRODUIT": "#77818E",
+    "제품명": "#8A49C7",
 }
+
 
 def _citation_rects(row, evidence):
     """Per-line observed English citation rectangles; never fabricate positions."""
@@ -59,13 +56,7 @@ def _citation_rects(row, evidence):
 
 
 def _kind(status, curved=False, product_curve=False):
-    if "문장 연결" in status:
-        return "문장 연결"
-    if "수치" in status:
-        return "수치 확인"
-    if "확인" in status or "OCR" in status or "복원" in status:
-        return "OCR 확인"
-    return "곡선" if product_curve else "한국어"
+    return "곡선" if (curved or product_curve) else "한국어"
 
 
 def _maximum_context(row, evidence):
@@ -105,16 +96,13 @@ def _maximum_context(row, evidence):
 
 
 def numeric_display_label(text, status, numeric_review=False, numeric_peers=None):
-    """A normal numeric phrase is reviewable, not necessarily erroneous."""
-    if numeric_review or "수치 대조 필요" in status:
-        return "수치 대조 필요"
-    if "문장 연결" in status:
-        return "수치 대조 필요 · 문장 연결" if numeric_peers else "문장 연결 확인"
-    if (re.search(r"\ufffd{1,6}\s*(?:%|/|배|년|위)", text)
-            or re.search(r"(?<!\w)\d{1,4}\s*&\s*(?=[가-힣]|$)", text)):
-        return "수치 대조 필요"
-    if numeric_tokens(text) or (numeric_peers or []):
-        return "수치 포함 · 확인 권장"
+    """One simple numeric type; uncertainty remains in the separate QA result."""
+    if numeric_review or "수치" in status or "숫자" in status:
+        return "수치 포함"
+    if re.search(r"\ufffd{1,6}\s*(?:%|/|배|년|위)", text):
+        return "수치 포함"
+    if numeric_tokens(text) or numeric_peers:
+        return "수치 포함"
     return ""
 
 
@@ -139,9 +127,7 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 group.get("numeric_review", False),
                 group.get("numeric_peer_evidence", []),
             )
-            color = ("수치 확인" if numeric_label.startswith("수치 대조")
-                     else "수치 포함" if numeric_label.startswith("수치 포함")
-                     else _kind(group["status"],
+            color = ("수치 포함" if numeric_label else _kind(group["status"],
                                 product_curve=group["type"] == "곡선 제품명"))
             claim_context = [
                 hit for i in indices
@@ -173,9 +159,7 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 row.get("numeric_review", False),
                 row.get("numeric_peer_evidence", []),
             )
-            color = ("수치 확인" if numeric_label.startswith("수치 대조")
-                     else "수치 포함" if numeric_label.startswith("수치 포함")
-                     else _kind(row["status"], product_curve=row.get("curved", False)))
+            color = ("수치 포함" if numeric_label else _kind(row["status"], product_curve=row.get("curved", False)))
             claim_context = _maximum_context(row, evidence)
             display_text = (
                 "최대 · 주변 PDF: " + " / ".join(hit["text"] for hit in claim_context)
@@ -195,12 +179,29 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
         if item["file"] != filename or int(item["page"]) != page or item.get("x0") is None:
             continue
         field = item["check"]
-        kind = ("전면 제품명" if "패키지 전면" in field else
-                "GAMME" if "GAMME" in field else "PRODUIT")
+        kind = "제품명"
         output.append({
             "label": item["extracted"], "kind": kind,
             "source": field, "status": item["status"],
             "rects": [rect_from_row(item)],
+        })
+    # Include readable English originals alongside Korean evidence.
+    # Exclude single tokens, job-ticket metadata, URLs and foreign scripts.
+    for item in evidence.values():
+        value = item.get("text", "").strip()
+        bbox = item.get("bbox")
+        if not bbox or len(bbox) != 4 or re.search(r"[가-힣\ufffd]", value):
+            continue
+        if not re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}", value):
+            continue
+        if re.search(r"[\u0e00-\u0e7f\u0400-\u052f\u0600-\u06ff]", value):
+            continue
+        if re.match(r"^(?:CLIENT|GAMME|DOSSIER|PRODUIT|ECHELLE|BARCODE|REF\s*:)", value, re.I):
+            continue
+        output.append({
+            "label": value, "kind": "영문", "display_label": "영문",
+            "source": "영문 원본", "status": "PDF 영문 추출",
+            "rects": [bbox],
         })
     return output
 
