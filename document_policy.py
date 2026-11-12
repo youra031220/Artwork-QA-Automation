@@ -149,6 +149,55 @@ def result_has_year_damage(results):
                for x in results)
 
 
+
+def evaluate_bilingual_values(matches,summaries,filename):
+    """Compare source-backed bilingual claim values, never workbook defaults.
+
+    Only percentages and performance multipliers with explicit units qualify;
+    cookware dimensions, reference footnote numbers, 18/10 steel grade and
+    date citations must not be conflated with promotional percentages.
+    """
+    from english_pairing import find_english_counterpart
+    results=[]
+    for match in matches:
+        if match.get("file")!=filename:
+            continue
+        ko=str(match.get("extracted") or "")
+        en=find_english_counterpart(match,summaries)
+        if not en:
+            continue
+        ko_multiplier=re.search(r"최대\s*(\d+(?:\.\d+)?)\s*배",ko)
+        en_multiplier=re.search(r"\bUP\s+TO\s+(\d+(?:\.\d+)?)\s*[Xx]\b",en,re.I)
+        if ko_multiplier and en_multiplier and float(ko_multiplier.group(1))!=float(en_multiplier.group(1)):
+            results.append(_add(filename,"DOC-BILINGUAL-MULTIPLIER","성능 수치","FAIL",
+                f"영문 {en_multiplier.group(1)}배, 국문 {ko_multiplier.group(1)}배 성능 수치 불일치",
+                [ko,en]))
+        ko_pct=re.search(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*%",ko)
+        en_pct=re.search(r"(?<!\d)(\d{1,3}(?:\.\d+)?)\s*%",en)
+        if ko_pct and en_pct and float(ko_pct.group(1))!=float(en_pct.group(1)):
+            results.append(_add(filename,"DOC-BILINGUAL-PERCENT","성능 수치","FAIL",
+                f"영문 {en_pct.group(1)}%, 국문 {ko_pct.group(1)}% 불일치",
+                [ko,en]))
+    return results
+
+
+def evaluate_recycling_exclusivity(matches,metadata,filename):
+    """Check two distinct printing variants, without mistaking overlap for
+    two variants inside ONE long recycling paragraph."""
+    variants=[]
+    for match in matches:
+        if match.get("file")!=filename:
+            continue
+        text=str(match.get("extracted") or "")
+        if not ("재활용" in text or "분리배출" in text):
+            continue
+        variants.append((text,bool(RECYCLE_GLASS_EXCLUSION.search(text))))
+    if not variants or len({flag for _,flag in variants})<2:
+        return []
+    return [_add(filename,"DOC-RECYCLE-MIXED","재활용","REVIEW",
+        "일반 재활용 안내와 유리뚜껑 제외 버전이 함께 발견됨. 동일 안내의 대체 문구인지 확인 필요",
+        [v for v,_ in variants])]
+
 def compare_range_messages(matches,metadata):
     """Cross-file check: only confirmed range names and explicit key-message
     classifications. Unknown range or unregistered key-message is not FAIL.
