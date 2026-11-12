@@ -61,6 +61,8 @@ def _one(row, master):
                 source_coordinates=row.get("source_coordinates", []),
                 ocr_candidates=row.get("ocr_candidates", []),
                 numeric_review=bool(row.get("numeric_review")),
+                original_extracted=row.get("original_paragraph", actual),
+                ocr_reconstructed=bool(row.get("ocr_reconstructed")),
                 phrase_id="", rule_id="", category="미분류", reference_korean="",
                 reference_english="", source_row=None, approval_status="",
                 differences="", reason="", candidates=[])
@@ -68,7 +70,11 @@ def _one(row, master):
     if not actual.strip():
         return dict(base, status="UNREGISTERED", reason="빈 문구")
     exact = [(p,v) for p,v in refs if actual == p["korean_original"]]
-    norm = [(p,v) for p,v in refs if compact(actual) == compact(p["korean_original"])]
+    # Only terminal punctuation and whitespace are cosmetic. A missing
+    # full-stop at the end of printed QR instructions is not a mistranslation.
+    def orthographic(value):
+        return compact(value).rstrip(".。")
+    norm = [(p,v) for p,v in refs if orthographic(actual) == orthographic(p["korean_original"])]
     matches = exact or norm
     if matches:
         if len({p["phrase_id"] for p,v in matches}) > 1:
@@ -171,7 +177,8 @@ def _one(row, master):
                 reference_korean=p["korean_original"],
                 reference_english=p.get("english_original",""),
                 approval_status=p.get("approval_status","UNVERIFIED"),
-                differences="숫자·단위 불일치" if mismatch else "문자·의미 검토 필요",
+                differences=("OCR 글자 손상 · 원본 확인" if row.get("numeric_review") or DAMAGE.search(actual)
+                             else "숫자·단위 불일치" if mismatch else "문자·의미 검토 필요"),
                 reason="가장 유사한 정답 후보. 자동 승인/발견 집계 제외",
                 candidates=others)
 
