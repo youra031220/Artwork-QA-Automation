@@ -45,12 +45,20 @@ def _target_pattern(reference):
     return re.compile(re.escape(compact).replace("202x", r"202\d"), re.I)
 
 
-def _source_match(raw, pattern):
+def _source_match(raw, pattern, reference=""):
     compact, offsets = _compact_with_offsets(raw)
     m = pattern.search(compact)
-    if m and offsets:
-        return raw[offsets[m.start()]:offsets[m.end()-1]+1].strip()
-    return ""
+    if not (m and offsets):
+        return ""
+    begin, end = offsets[m.start()], offsets[m.end()-1]+1
+    # Preserve punctuation physically printed at the boundaries: '(1)' at
+    # the beginning of a footnote and the final period in a source citation.
+    ref = str(reference or "").strip()
+    if ref.startswith("(") and begin > 0 and raw[begin-1] == "(":
+        begin -= 1
+    if ref.endswith(".") and end < len(raw) and raw[end] == ".":
+        end += 1
+    return raw[begin:end].strip()
 
 
 def _source_prefix(raw, reference):
@@ -59,7 +67,7 @@ def _source_prefix(raw, reference):
     target, _ = _compact_with_offsets(reference)
     if len(target) < 5 or not compact:
         return ""
-    start = compact.find(target[:min(6, len(target))])
+    start = compact.find(target[:min(4, len(target), len(compact))])
     if start < 0:
         return ""
     return raw[offsets[start]:]
@@ -117,7 +125,7 @@ def find_english_counterpart(match, summaries):
         if _english_line(entry)
     ]
     for entry in lines:
-        found=_source_match(entry["text"],pattern)
+        found=_source_match(entry["text"],pattern,reference)
         if found:
             return found
     # Only start at a PDF line containing the beginning of the reference.
@@ -136,7 +144,7 @@ def find_english_counterpart(match, summaries):
             if (selected,_compact_with_offsets(current)[0]) in visited:
                 continue
             visited.add((selected,_compact_with_offsets(current)[0]))
-            found=_source_match(current,pattern)
+            found=_source_match(current,pattern,reference)
             if found:
                 return found
             if len(selected)>=max_nodes:
