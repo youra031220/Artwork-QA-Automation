@@ -34,7 +34,7 @@ class SourceOverlayTests(unittest.TestCase):
                               group_view=True, raw_summaries=summaries)
         self.assertEqual(len(boxes), 1)
         self.assertEqual(boxes[0]["kind"], "수치 포함")
-        self.assertEqual(boxes[0]["display_label"], "수치 포함 · 확인 권장")
+        self.assertEqual(boxes[0]["display_label"], "수치 포함")
         self.assertEqual(len(boxes[0]["rects"]), 3)
         self.assertTrue(any(r[1] == 40 for r in boxes[0]["rects"]))
         self.assertTrue(any(r[1] == 53 and r[0] == 30 for r in boxes[0]["rects"]))
@@ -123,25 +123,25 @@ class SourceOverlayTests(unittest.TestCase):
     def test_numeric_labels_normal_and_uncertain(self):
         self.assertEqual(numeric_display_label(
             "최대 40% 수납 공간 절약", "원본 추출 정상"),
-            "수치 포함 · 확인 권장")
+            "수치 포함")
         self.assertEqual(numeric_display_label(
             "최대 3배 코팅", "원본 추출 정상"),
-            "수치 포함 · 확인 권장")
+            "수치 포함")
         self.assertEqual(numeric_display_label(
             "18/10 스테인리스 10년", "원본 추출 정상"),
-            "수치 포함 · 확인 권장")
+            "수치 포함")
         self.assertEqual(numeric_display_label(
             "최대 40& 수납 공간 절약", "원본 추출 정상"),
-            "수치 대조 필요")
+            "수치 포함")
         self.assertEqual(numeric_display_label(
             "최대 ��% 수납 공간 절약", "수치 대조 필요 · 원본 확인", True),
-            "수치 대조 필요")
+            "수치 포함")
         self.assertEqual(numeric_display_label(
             "제품 설명", "원본 추출 정상"), "")
         self.assertEqual(numeric_display_label(
             "최대 [뒤따르는 수치·문구 연결 확인 필요]",
             "문장 연결 확인 필요 · 숫자 객체 연결 미확정",
-            True, [{"text": "40%"}]), "수치 대조 필요")
+            True, [{"text": "40%"}]), "수치 포함")
 
     def test_normal_number_visible_in_dropdown_data(self):
         row = {"file": "synthetic.pdf", "page": 1,
@@ -151,7 +151,7 @@ class SourceOverlayTests(unittest.TestCase):
                "curved": False, "raw_evidence_ids": []}
         boxes = collect_boxes([row], [], [], "synthetic.pdf", 1, group_view=False)
         self.assertEqual(boxes[0]["kind"], "수치 포함")
-        self.assertEqual(boxes[0]["display_label"], "수치 포함 · 확인 권장")
+        self.assertEqual(boxes[0]["display_label"], "수치 포함")
         self.assertEqual(boxes[0]["label"], row["korean_text"])
         self.assertEqual(boxes[0]["status"], "원본 추출 정상")
 
@@ -193,7 +193,7 @@ class SourceOverlayTests(unittest.TestCase):
                "source_citation": "", "raw_evidence_ids": []}
         boxes = collect_boxes([row], [], [], "synthetic.pdf", 1,
                               group_view=False)
-        self.assertEqual(boxes[0]["kind"], "수치 확인")
+        self.assertEqual(boxes[0]["kind"], "수치 포함")
         self.assertEqual(boxes[0]["line_index"], 0)
 
 
