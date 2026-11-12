@@ -1,5 +1,6 @@
 import unittest
-from document_policy import evaluate_document_policy, compare_range_messages
+from document_policy import (evaluate_document_policy, compare_range_messages,
+    evaluate_bilingual_values, evaluate_recycling_exclusivity)
 
 
 def row(text, filename="sample.pdf", category="", status="EXACT_MATCH"):
@@ -91,6 +92,35 @@ class CorrectionPolicyTests(unittest.TestCase):
         rr=self.evaluate(["적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능."],(),
                          metadata=[{"file":"sample.pdf","lid_material":"unknown"}])
         self.assertFalse(any(r["rule_id"]=="DOC-RECYCLE-GLASS" for r in rr))
+
+    def test_bilingual_multiplier_actual_values_conflict(self):
+        ko=row("테팔 기본 코팅 대비 최대 3배 더 오래가는 코팅")
+        ko["reference_english"]="UP TO 5X MORE RESISTANT"
+        evidence=raw("UP TO 5X MORE RESISTANT")
+        violations=evaluate_bilingual_values([ko],evidence,"sample.pdf")
+        self.assertEqual(next(r for r in violations if r["rule_id"]=="DOC-BILINGUAL-MULTIPLIER")["status"],"FAIL")
+
+    def test_bilingual_percentage_actual_values_conflict(self):
+        ko=row("최대 40% 수납 공간 절약")
+        ko["reference_english"]="UP TO 30% SPACE SAVING"
+        violations=evaluate_bilingual_values([ko],raw("UP TO 30% SPACE SAVING"),"sample.pdf")
+        self.assertEqual(next(r for r in violations if r["rule_id"]=="DOC-BILINGUAL-PERCENT")["status"],"FAIL")
+
+    def test_missing_english_value_is_not_invented_from_master(self):
+        ko=row("최대 40% 수납 공간 절약")
+        ko["reference_english"]="UP TO 30% SPACE SAVING"
+        self.assertEqual(evaluate_bilingual_values([ko],raw("FRENCH OTHER SOURCE"),"sample.pdf"),[])
+
+    def test_two_distinct_recycling_qualifiers_require_review(self):
+        mm=[row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능."),
+            row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능 (유리뚜껑 제외).")]
+        rr=evaluate_recycling_exclusivity(mm,[],"sample.pdf")
+        self.assertEqual(rr[0]["status"],"REVIEW")
+        self.assertEqual(rr[0]["rule_id"],"DOC-RECYCLE-MIXED")
+
+    def test_single_recycling_notice_containing_exclusion_is_not_conflict(self):
+        mm=[row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능 (유리뚜껑 제외).")]
+        self.assertEqual(evaluate_recycling_exclusivity(mm,[],"sample.pdf"),[])
 
     def test_product_isolation_across_two_uploaded_documents(self):
         matches=[row(self.OLD,"first.pdf"),row(self.NEW,"second.pdf")]
