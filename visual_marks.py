@@ -110,24 +110,45 @@ def image_mark_candidates(page, filename, metadata=None):
         add("WORLD_NO1","세계 1위 엠블럼",box,
             "world_red_panel_verified_by_raster_text","DETECTED")
 
-    # MADE IN FRANCE: compact light badge with French tricolor and word FRANCE.
-    # Test a small surrounding rectangle rather than text at any location.
+    # MADE IN FRANCE: two small BLUE/RED bars on a pale badge with FRANCE
+    # underneath. Manufacturer addresses elsewhere on the page are ignored.
     country=metadata.get("manufacturing_country")
     if country=="FRANCE":
-        for word in page.search_for("FRANCE")[:25]:
-            box=fitz.Rect(word.x0-40,word.y0-45,word.x1+40,word.y1+18)&page.rect
-            if box.is_empty or box.width>125 or box.height>125:
+        from PIL import Image
+        import pytesseract
+        blue=cv2.inRange(hsv,np.array((96,120,115),dtype=np.uint8),
+                             np.array((135,255,255),dtype=np.uint8))
+        redbar=red
+        blue_contours,_=cv2.findContours(blue,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        red_contours,_=cv2.findContours(redbar,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+        bars=[]
+        for contour in red_contours:
+            rx,ry,rw,rh=cv2.boundingRect(contour)
+            if 7<=rw<=55 and 2<=rh<=13:
+                bars.append((rx,ry,rw,rh))
+        for contour in blue_contours:
+            bx,by,bw,bh=cv2.boundingRect(contour)
+            if not (7<=bw<=55 and 2<=bh<=13 and bw/bh>=2):
                 continue
-            pix=page.get_pixmap(clip=box,matrix=fitz.Matrix(2,2),alpha=False)
-            pixels=np.frombuffer(pix.samples,dtype=np.uint8).reshape(pix.height,pix.width,3)
-            subhsv=cv2.cvtColor(pixels,cv2.COLOR_RGB2HSV)
-            blue=cv2.inRange(subhsv,np.array((95,85,55),dtype=np.uint8),
-                                     np.array((140,255,255),dtype=np.uint8))
-            # Printed FRANCE word together with actual blue accent is evidence
-            # of badge layout, unlike a plain manufacturer address.
-            if np.count_nonzero(blue)>15 and "FRANCE" in _words_inside(page,box).upper():
+            partners=[bar for bar in bars if 4<=bar[0]-(bx+bw)<=55
+                and abs(bar[1]-by)<=6 and .55<=bar[2]/bw<=1.65]
+            for rx,ry,rw,rh in partners[:2]:
+                bounds=fitz.Rect(
+                    max(0,(bx-14)/scale),max(0,(by-26)/scale),
+                    min(page.rect.x1,(rx+rw+15)/scale),
+                    min(page.rect.y1,(by+52)/scale))
+                pix=page.get_pixmap(clip=bounds,matrix=fitz.Matrix(5,5),alpha=False)
+                patch=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
+                try:
+                    label=pytesseract.image_to_string(patch,lang="eng",
+                                   config="--oem 3 --psm 6").upper()
+                except pytesseract.TesseractError:
+                    continue
+                if "FRANCE" not in label:
+                    continue
                 add("MADE_IN_FRANCE","Made in France 배지",
-                    [box.x0,box.y0,box.x1,box.y1],"french_badge_text_blue_pixel")
+                    [bounds.x0,bounds.y0,bounds.x1,bounds.y1],
+                    "blue_red_france_badge_pixels","DETECTED")
 
     # INDuction: orange round IH badge, distinguish from red text/panels.
     orange=cv2.inRange(hsv,np.array((4,95,55),dtype=np.uint8),
