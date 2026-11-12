@@ -83,25 +83,20 @@ def _near(left, right):
 
 
 def _is_prefix(candidate, target):
-    """A partially printed claim must match the beginning of the template."""
+    """Accept a valid partial reference or a complete reference with suffix."""
     have,_ = _compact_with_offsets(candidate)
     expected,_ = _compact_with_offsets(target)
-    if not have:
+    if not have or not expected:
         return False
-    # A 202X in the master stands for one observed digit, independently.
-    # Check this character-by-character so partial lines can be pruned.
-    for a,b in zip(have, expected):
-        if b == "x" and False:  # only use X in an actual 202X context below
-            continue
-        if a != b:
-            break
-    else:
-        return True
-    # Convert both to an anchored regex which works on partially assembled
-    # strings, including partial year text at line boundaries.
-    projected=expected[:len(have)]
-    projected_regex=re.escape(projected).replace("202x",r"202\d")
-    return bool(re.fullmatch(projected_regex,have)) and len(have)<=len(expected)
+    full = re.compile(re.escape(expected).replace("202x", r"202\d"))
+    if full.match(have):
+        return True  # PDF line may continue with unrelated translated content
+    if len(have) > len(expected):
+        return False
+    projected = expected[:len(have)]
+    return bool(re.fullmatch(
+        re.escape(projected).replace("202x", r"202\d"), have
+    ))
 
 
 def find_english_counterpart(match, summaries):
