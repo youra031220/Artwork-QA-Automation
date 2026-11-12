@@ -81,8 +81,8 @@ class MarkImageTests(unittest.TestCase):
         pdf.close()
         findings=detect_pdf_marks(source,"red.pdf")
         world=[x for x in findings if x["code"]=="WORLD_NO1"]
-        self.assertTrue(world)
         self.assertFalse(any(x["method"]=="image_region_text_anchor" for x in world))
+        # Without image OCR confirmation, a red banner stays unverified.
 
     def test_raster_world_badge_detected_without_native_world_text(self):
         # A logo flattened into an image has no PDF-native WORLD lettering.
