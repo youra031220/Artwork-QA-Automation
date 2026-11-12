@@ -260,6 +260,49 @@ class LongPhraseTableTests(unittest.TestCase):
 
 
 class EnglishEvidenceTests(unittest.TestCase):
+    def test_mint_real_printed_space_claim_uses_five_native_objects(self):
+        # Mint Calm PDF splits one visible claim into FIVE independent glyphs.
+        match={"file":"mint.pdf","page":1,
+               "reference_english":"UP TO 40% SPACE SAVING(1)"}
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"UP TO ","bbox":[814,825,832,834]},
+            {"text":"40%","bbox":[839,788,898,844]},
+            {"text":"SPACE ","bbox":[813,824,905,880]},
+            {"text":"SAVING","bbox":[813,858,900,907]},
+            {"text":"(1)","bbox":[900,869,909,884]},
+            {"text":"3X MORE RESISTANT","bbox":[927,819,1072,829]},
+        ]}]
+        self.assertEqual(find_english_counterpart(match,summary),
+                         "UP TO 40% SPACE SAVING (1)")
+
+    def test_mint_real_printed_footnote_whitespace_and_zero_width(self):
+        reference=("(1)Tested on 3 saucepans, 1 sautepan/shallow, "
+                   "between a previous Tefal range and a new generation range\u200b")
+        printed=("(1) Tested on 3 saucepans, 1 sautepan/shallow, "
+                 "between a previous Tefal range and a new generation range ")
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":printed,"bbox":[1430,1079,1665,1088]}
+        ]}]
+        self.assertEqual(find_english_counterpart({
+            "file":"mint.pdf","page":1,"reference_english":reference},summary),
+            printed.strip())
+
+    def test_mint_real_euromonitor_two_lines_with_other_language_suffix(self):
+        reference=("Tefal world N°1 in cookware. Source : Euromonitor "
+                   "International Limited, Home and Garden 202X edition, "
+                   "brand retail value RSP, 202X data.")
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"**Tefal world N°1 in cookware. Source : Euromonitor International Limited, Home and Garden 2026 edition, brand retail ",
+             "bbox":[464,943,707,950]},
+            {"text":"value RSP, 2025 data. / Tefal Perkakas memasak No.1 di dunia. Sumber: Euromonitor International Limited, edisi Home ",
+             "bbox":[464,950,707,957]},
+        ]}]
+        found=find_english_counterpart(
+            {"file":"mint.pdf","page":1,"reference_english":reference},summary)
+        self.assertIn("Home and Garden 2026 edition",found)
+        self.assertTrue(found.endswith("2025 data."))
+        self.assertNotIn("Perkakas",found)
+
     def test_english_rotated_caption_in_reverse_vertical_order(self):
         # Actual EXPERTISE RUBY artwork: first text object is lower than
         # the following "made to last" text object.
