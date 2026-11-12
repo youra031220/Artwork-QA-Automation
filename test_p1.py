@@ -260,6 +260,68 @@ class LongPhraseTableTests(unittest.TestCase):
 
 
 class EnglishEvidenceTests(unittest.TestCase):
+    def test_english_rotated_caption_in_reverse_vertical_order(self):
+        # Actual EXPERTISE RUBY artwork: first text object is lower than
+        # the following "made to last" text object.
+        match={"file":"ruby.pdf","page":1,
+               "reference_english":"Scratch-resistant, made to last"}
+        summary=[{"file":"ruby.pdf","page":1,"raw_evidence":[
+            {"text":"Scratch-resistant, ","bbox":[306,2020,485,2043]},
+            {"text":"made to last","bbox":[371,1999,485,2023]},
+            {"text":"TOUS FEUX + INDUCTION","bbox":[225,425,388,443]}
+        ]}]
+        self.assertEqual(find_english_counterpart(match,summary),
+                         "Scratch-resistant, made to last")
+
+    def test_wrapped_three_line_source_matches_variable_years(self):
+        english=("Tefal world N°1 in cookware. Source : Euromonitor "
+                 "International Limited, Home and Garden 202X edition, "
+                 "brand retail value RSP, 202X data.")
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"**Tefal world N°1 in cookware. Source : Euromonitor ",
+             "bbox":[516,1077,802,1085]},
+            {"text":"International Limited, Home and Garden 2026 edition, ",
+             "bbox":[516,1085,802,1093]},
+            {"text":"brand retail value RSP, 2025 data. / Tefal Malay",
+             "bbox":[516,1093,802,1101]},
+        ]}]
+        result=find_english_counterpart(
+            {"file":"mint.pdf","page":1,"reference_english":english},summary)
+        self.assertIn("Home and Garden 2026",result)
+        self.assertIn("2025 data.",result)
+        self.assertNotIn("Malay",result)
+
+    def test_reference_years_are_not_assumed_equal(self):
+        ref=("Tefal world N°1 in cookware. Source : Euromonitor "
+             "International Limited, Home and Garden 202X edition, "
+             "brand retail value RSP, 202X data.")
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":ref.replace("202X edition","2026 edition")
+                        .replace("202X data","2025 data"),"bbox":[10,10,200,30]}
+        ]}]
+        self.assertIn("2025 data",find_english_counterpart(
+            {"file":"mint.pdf","page":1,"reference_english":ref},summary))
+
+    def test_english_split_over_three_native_objects(self):
+        summary=[{"file":"mint.pdf","page":1,"raw_evidence":[
+            {"text":"Get the best use &","bbox":[813,1766,879,1777]},
+            {"text":"care","bbox":[813,1776,850,1787]},
+            {"text":"advice","bbox":[813,1787,860,1797]},
+        ]}]
+        found=find_english_counterpart(
+            {"file":"mint.pdf","page":1,
+             "reference_english":"Get the best use & care advice"},summary)
+        self.assertEqual(found,"Get the best use & care advice")
+
+    def test_do_not_join_distant_english_blocks(self):
+        summary=[{"file":"x.pdf","page":1,"raw_evidence":[
+            {"text":"Scratch-resistant,","bbox":[10,20,100,33]},
+            {"text":"made to last","bbox":[350,850,470,865]},
+        ]}]
+        self.assertEqual(find_english_counterpart(
+            {"file":"x.pdf","page":1,
+             "reference_english":"Scratch-resistant, made to last"},summary),"")
+
     def test_reference_hyphen_differs_from_pdf_but_observed_copy_shown(self):
         match={
             "file":"test.pdf","page":1,
