@@ -18,6 +18,7 @@ from reviewer_table import reviewer_html_table
 from english_pairing import find_english_counterpart
 from document_policy import (evaluate_document_policy, compare_range_messages,
                              evaluate_bilingual_values, evaluate_recycling_exclusivity)
+from policy_ui import render_policy_status
 import io
 import zipfile
 import json
@@ -233,15 +234,19 @@ if st.session_state.get("qa_result"):
                     issue = match.get("reason") or "기준 문구 확인 필요"
                 if match.get("ocr_reconstructed") and not issue:
                     issue = "원본 문구 확인 필요"
+                verdict, reviewer_issue = render_policy_status(
+                    match, p1_rules,
+                    "확인 필요" if is_uncertain else reviewer_status(match["status"]),
+                    issue)
                 shown_by_file[match["file"]].append({
                     "국문 추출 문구": phrase,
                     "영문 추출 문구": find_english_counterpart(match, summaries),
                     "문구 카테고리": match.get("category") or "미분류",
                     "문구 유형": "수치 포함" if has_number else "일반 문구",
-                    "대조 결과": ("확인 필요" if is_uncertain else reviewer_status(match["status"])),
+                    "대조 결과": verdict,
                     "기준 국문": match.get("reference_korean", ""),
                     "기준 영문": match.get("reference_english", ""),
-                    "확인할 사항": issue,
+                    "확인할 사항": reviewer_issue,
                 })
             for filename in all_files:
                 product_rows = shown_by_file[filename]
