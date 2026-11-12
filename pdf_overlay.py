@@ -4,6 +4,7 @@ import re
 import fitz
 from PIL import Image, ImageDraw
 from extractor import numeric_tokens
+from ui_labels import readable_group, readable_row
 
 COLORS = {
     "한국어": "#2788DA",
@@ -140,6 +141,11 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 for summary in (raw_summaries or [])
                 if summary.get("file") == filename and int(summary.get("page", -1)) == page
                 for item in summary.get("raw_evidence", [])}
+    parent_by_row = {
+        index: group for group in groups
+        for index in group.get("line_indices", [])
+        if isinstance(index, int)
+    }
     if group_view:
         for group in groups:
             if group["file"] != filename or int(group["page"]) != page:
@@ -163,7 +169,7 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
                 "최대 · 주변 PDF: " + " / ".join(context_labels)
                 + " (연결 확인)"
                 if group.get("type") == "문장 연결 확인" and context_labels
-                else group["paragraph"]
+                else readable_group(group)
             )
             output.append({
                 "label": display_text, "kind": color,
@@ -188,7 +194,7 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
             claim_context = _maximum_context(row, evidence)
             display_text = (
                 "최대 · 주변 PDF: " + " / ".join(hit["text"] for hit in claim_context)
-                + " (연결 확인)" if claim_context else row["korean_text"]
+                + " (연결 확인)" if claim_context else readable_row(row, parent_by_row.get(row_index))
             )
             output.append({
                 "label": display_text, "kind": color,
