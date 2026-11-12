@@ -182,21 +182,28 @@ def evaluate_bilingual_values(matches,summaries,filename):
 
 
 def evaluate_recycling_exclusivity(matches,metadata,filename):
-    """Check two distinct printing variants, without mistaking overlap for
-    two variants inside ONE long recycling paragraph."""
-    variants=[]
+    """Exactly one approved Korean disposal wording variant per product.
+
+    A Korean printed recycling statement may have the glass-lid exclusion
+    or not. Repeated *same* statement is one choice; two different choices
+    on the same artwork violate the documented exclusivity rule.
+    """
+    variants={}
     for match in matches:
         if match.get("file")!=filename:
             continue
         text=str(match.get("extracted") or "")
-        if not ("재활용" in text or "분리배출" in text):
+        if not re.search(r"적절한\s*분리\s*배출",text):
             continue
-        variants.append((text,bool(RECYCLE_GLASS_EXCLUSION.search(text))))
-    if not variants or len({flag for _,flag in variants})<2:
+        glass=bool(RECYCLE_GLASS_EXCLUSION.search(text))
+        label="유리뚜껑 제외 안내" if glass else "일반 재활용 안내"
+        variants.setdefault(label,[]).append(text)
+    if len(variants)<2:
         return []
-    return [_add(filename,"DOC-RECYCLE-MIXED","재활용","REVIEW",
-        "일반 재활용 안내와 유리뚜껑 제외 버전이 함께 발견됨. 동일 안내의 대체 문구인지 확인 필요",
-        [v for v,_ in variants])]
+    return [_add(filename,"DOC-RECYCLE-MIXED","재활용","FAIL",
+        "서로 다른 재활용 안내 두 버전이 함께 표기됨. 제품 구성에 맞는 하나만 사용해야 함",
+        [value for entries in variants.values() for value in entries])]
+
 
 def compare_range_messages(matches,metadata):
     """Cross-file check: only confirmed range names and explicit key-message
