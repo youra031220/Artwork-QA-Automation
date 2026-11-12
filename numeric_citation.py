@@ -29,27 +29,43 @@ def _bounds(group):
 
 
 def _read_korean_print(page, rect, dpi=350):
-    """Only Korean visible tokens, not the adjacent other-language year."""
-    clip=fitz.Rect(rect.x0-5,rect.y0-4,rect.x1+5,rect.y1+6) & page.rect
-    if clip.is_empty:
-        return None
-    pix=page.get_pixmap(clip=clip,matrix=fitz.Matrix(dpi/72,dpi/72),alpha=False)
-    img=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
-    img=ImageOps.autocontrast(ImageOps.grayscale(img))
-    for psm in (6,3):
-        try:
-            result=pytesseract.image_to_string(
-                img,lang="kor+eng",config=f"--oem 3 --psm {psm}")
-        except pytesseract.TesseractError:
+    """Read Korean rank and sales-data year from printed Korean lines only.
+
+    A narrow crop can clip the line ending, so inspect two bounded margins
+    and two Tesseract segmentations. Return only digits OCR observed after
+    Korean anchors; never copy the adjacent Turkish/English year.
+    """
+    found_rank=None
+    found_year=None
+    evidence=[]
+    for top_margin in (5,12):
+        clip=fitz.Rect(rect.x0-5,rect.y0-top_margin,
+                       rect.x1+5,rect.y1+7) & page.rect
+        if clip.is_empty:
             continue
-        norm=" ".join(result.split())
-        # Both numeral strings must belong to the same Korean-language
-        # Euromonitor excerpt; a nearby Turkish '2025' is insufficient.
-        rank=bool(re.search(r"세계\s*판매\s*1\s*위",norm))
-        ko_year=re.search(r"브랜드\s*(?:매출|메출)\s*[,，]?\s*(20\d{2})\s*기[준순]",norm)
-        if rank or ko_year:
-            return ("1" if rank else None,
-                    ko_year.group(1) if ko_year else None, norm)
+        pix=page.get_pixmap(clip=clip,
+             matrix=fitz.Matrix(dpi/72,dpi/72),alpha=False)
+        img=ImageOps.autocontrast(ImageOps.grayscale(
+            Image.frombytes("RGB",(pix.width,pix.height),pix.samples)))
+        for psm in (6,3):
+            try:
+                result=pytesseract.image_to_string(
+                    img,lang="kor+eng",config=f"--oem 3 --psm {psm}")
+            except pytesseract.TesseractError:
+                continue
+            norm=" ".join(result.split())
+            evidence.append(norm)
+            if re.search(r"세계\s*판매\s*1\s*위",norm):
+                found_rank="1"
+            korean_year=re.search(
+                r"브랜드\s*(?:매출|메출)\s*[,，]?\s*(20\d{2})\s*기[준순]",
+                norm)
+            if korean_year:
+                found_year=korean_year.group(1)
+            if found_rank and found_year:
+                return found_rank,found_year,norm
+    if found_rank or found_year:
+        return found_rank,found_year," ".join(evidence)
     return None
 
 
