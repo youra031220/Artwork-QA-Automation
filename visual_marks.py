@@ -144,6 +144,49 @@ def image_mark_candidates(page, filename, metadata=None):
             [region.x0,region.y0,region.x1,region.y1],
             "native_world_n1_cookware_on_red_panel","DETECTED")
 
+    # Direct raster pattern recognition: detect the white FRANCE label and
+    # orange IH circle independently of PDF selectable text.
+    # Colour masks restrict candidates to actual artwork (not footnotes).
+    for code,label,mask,shape in (
+        ("MADE_IN_FRANCE","Made in France 배지",
+         cv2.inRange(hsv,np.array((90,45,40),np.uint8),
+                         np.array((145,255,255),np.uint8)),"rect"),
+        ("INDUCTION","인덕션 아이콘",
+         cv2.bitwise_or(cv2.inRange(hsv,np.array((0,80,45),np.uint8),
+                                       np.array((26,255,255),np.uint8)),
+                        cv2.inRange(hsv,np.array((170,80,45),np.uint8),
+                                       np.array((179,255,255),np.uint8))),"circle"),
+    ):
+        contours,_=cv2.findContours(mask,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x,y,cw,ch=cv2.boundingRect(cnt)
+            if not (12<=cw<=110 and 12<=ch<=110):
+                continue
+            ratio=cw/max(ch,1)
+            if shape=="circle" and not (.75<=ratio<=1.25):
+                continue
+            # Evaluate the complete neighbourhood rather than the isolated
+            # colour stroke. Native text is optional (flattened logos).
+            margin=max(5,int(max(cw,ch)*.25))
+            xx=max(0,x-margin); yy=max(0,y-margin)
+            xx2=min(w,x+cw+margin);yy2=min(h,y+ch+margin)
+            patch=rgb[yy:yy2,xx:xx2]
+            if patch.size==0: continue
+            gray=cv2.cvtColor(patch,cv2.COLOR_RGB2GRAY)
+            try:
+                import pytesseract
+                from PIL import Image
+                text=pytesseract.image_to_string(
+                    Image.fromarray(cv2.resize(patch,None,fx=5,fy=5)),
+                    lang="eng",config="--psm 11").upper()
+            except Exception:
+                text=""
+            if code=="MADE_IN_FRANCE" and not re.search(r"FRANCE",text):
+                continue
+            if code=="INDUCTION" and not re.search(r"(?<![A-Z])I\\s*H(?![A-Z])",text):
+                continue
+            add(code,label,_rect(xx,yy,xx2-xx,yy2-yy,scale),
+                "raster_badge_with_local_ocr","DETECTED")
     # France badge: detect the actual compact FABRIQUÉ EN / FRANCE
     # typography, not a manufacturer address or barcode.
     words=page.get_text("words")
