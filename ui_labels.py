@@ -61,7 +61,39 @@ def readable_ocr_review(match):
             best,score = candidate,similarity
     if best:
         return re.sub(r"\s+", " ", best).strip()
-    return "원본 문구 확인 필요" if "\ufffd" in original else original
+    # Preserve the actual sentence even when OCR has not resolved every glyph.
+    return original.replace("\ufffd", "□")
+
+
+def readable_group(group):
+    """Same displayed wording for the review table and the PDF overlay."""
+    row = {
+        "extracted": group.get("paragraph", group.get("korean_text", "")),
+        "status": "OCR_REVIEW" if (group.get("numeric_review")
+                                     or "\ufffd" in group.get("paragraph", ""))
+                  else "EXACT_MATCH",
+        "ocr_candidates": group.get("ocr_candidates", []),
+    }
+    return readable_ocr_review(row)
+
+
+def readable_row(row, parent=None):
+    """Use parent group OCR-verified warranty numeral in line view too."""
+    import re
+    text = row.get("korean_text", "")
+    if parent and parent.get("ocr_reconstructed"):
+        whole = parent.get("paragraph", "")
+        if re.search(r"[\ufffd□]{1,4}\s*년간", text):
+            observed = re.search(r"(?<!\d)(\d{1,2})\s*년간", whole)
+            if observed:
+                text = re.sub(r"[\ufffd□]{1,4}\s*년간",
+                              observed.group(1) + "년간", text, count=1)
+    return readable_ocr_review({
+        "status": "OCR_REVIEW" if "\ufffd" in text else "EXACT_MATCH",
+        "extracted": text,
+        "ocr_candidates": ([{"text": row["ocr_candidate"]}]
+                           if row.get("ocr_candidate") else []),
+    })
 
 
 QA_STATUS_KO = {
