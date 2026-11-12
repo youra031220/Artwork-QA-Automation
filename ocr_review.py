@@ -293,3 +293,85 @@ def combine_damaged_attribution(groups, pdf_contents, dpi=350):
         for doc in docs.values():
             doc.close()
     return [replace.get(i,g) for i,g in enumerate(groups) if i not in remove]
+
+
+
+def _ocr_warranty_year(page, bounds, dpi=350):
+    """Read the numeral printed before 년간, never from reference/English text."""
+    region = fitz.Rect(bounds.x0 - 7, bounds.y0 - 5,
+                       bounds.x1 + 9, bounds.y1 + 5) & page.rect
+    if region.is_empty:
+        return None
+    pix = page.get_pixmap(clip=region,
+                          matrix=fitz.Matrix(dpi / 72, dpi / 72),
+                          alpha=False)
+    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    for psm in (6, 3):
+        try:
+            result = pytesseract.image_to_string(
+                image, lang="kor+eng", config=f"--oem 3 --psm {psm}")
+        except pytesseract.TesseractError:
+            continue
+        if not ("품질" in result and "보증" in result):
+            continue
+        years = set(re.findall(r"(?<!\d)(\d{1,2})\s*년간", result))
+        if len(years) == 1:
+            year = years.pop()
+            if 1 <= int(year) <= 20:
+                return year
+    return None
+
+
+def recover_damaged_warranty(groups, pdf_contents, dpi=350):
+    """Repair only observed Korean warranty year in already extracted groups.
+
+    Original PDF text, source coordinates, OCR evidence and human REVIEW flag
+    stay attached to the displayed phrase.
+    """
+    result = []
+    documents = {}
+    try:
+        for group in groups:
+            source = group.get("paragraph", "")
+            if not (("테팔은" in source or "품질 보증" in source)
+                    and re.search(r"[\ufffd□]{1,4}\s*년간", source)):
+                result.append(group)
+                continue
+            filename = group.get("file")
+            bounds = _bounds(group)
+            if filename not in pdf_contents or bounds is None:
+                result.append(group)
+                continue
+            try:
+                if filename not in documents:
+                    documents[filename] = fitz.open(
+                        stream=pdf_contents[filename], filetype="pdf")
+                page = documents[filename][int(group["page"]) - 1]
+                year = _ocr_warranty_year(page, bounds, dpi)
+            except (ValueError, IndexError, fitz.FileDataError):
+                year = None
+            if not year:
+                result.append(group)
+                continue
+            updated = re.sub(
+                r"[\ufffd□]{1,4}\s*년간", year + "년간", source, count=1)
+            if updated == source:
+                result.append(group)
+                continue
+            restored = dict(group)
+            restored["paragraph"] = updated
+            restored["original_paragraph"] = source
+            restored["ocr_reconstructed"] = True
+            restored["numeric_review"] = True
+            restored["status"] = "보증기간 숫자 원본 대조 필요"
+            restored["ocr_candidates"] = list(group.get("ocr_candidates", [])) + [
+                {"text": updated, "source": "PDF 인쇄 영역에서 350 DPI 재판독"}
+            ]
+            restored["warnings"] = list(group.get("warnings", [])) + [
+                "보증기간 숫자는 원본 이미지에서 재인식했으며, 기준 적용 여부는 별도 검수"
+            ]
+            result.append(restored)
+    finally:
+        for doc in documents.values():
+            doc.close()
+    return result
