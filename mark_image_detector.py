@@ -255,36 +255,16 @@ def review_mark_rules(findings, summaries, metadata, filename, matches=None):
         hits=[f for f in in_file if f["code"]==code]
         definite=[f for f in hits if f["status"]=="DETECTED"]
         status="OK" if definite and code=="TEFAL_COMMITMENTS_QR" else "REVIEW"
-        # WORLD badge requires an actual source footnote, not just the
-        # isolated word Euromonitor elsewhere in the multilingual panel.
+        # Footnotes are not visual badges. A badge must be detected in raster
+        # evidence before its bilingual attribution becomes applicable.
         if code=="WORLD_NO1" and definite:
-            source_en=bool(re.search(r"Home\s+and\s+Garden\s+20\d{2}\s+edition",native,re.I)
-                           and re.search(r"20\d{2}\s+data\b",native,re.I)
-                           and "Euromonitor" in native)
-            source_ko=bool(re.search(r"Home\s+and\s+Garden\s+20\d{2}\s*에디션",ko,re.I)
-                           and re.search(r"20\d{2}\s*기준",ko)
-                           and "Euromonitor" in ko)
-            status="OK" if source_en and source_ko else "REVIEW"
-        # A visually confirmed WORLD N°1 emblem activates the mandatory
-        # bilingual Euromonitor attribution rule. Unreadable native numerals
-        # remain REVIEW rather than being guessed from the workbook.
-        if code=="WORLD_NO1" and definite:
-            english_complete=bool(
-                re.search(r"Tefal\\s+world\\s+N[°ºo]?\\s*1\\s+in\\s+cookware",native,re.I)
-                and re.search(r"Euromonitor\\s+International\\s+Limited",native,re.I)
-                and re.search(r"Home\\s+and\\s+Garden\\s+20\\d{2}\\s+edition",native,re.I)
-                and re.search(r"20\\d{2}\\s+data\\b",native,re.I))
-            korean_complete=bool(
-                re.search(r"(?:테팔\\s*)?세계\\s*판매\\s*1\\s*위",ko)
-                and re.search(r"Euromonitor\\s+International\\s+Limited",ko,re.I)
-                and re.search(r"Home\\s+and\\s+Garden\\s+20\\d{2}\\s*에디션",ko,re.I)
-                and re.search(r"20\\d{2}\\s*기준",ko))
-            # A missing source is a failure only if the relevant text is
-            # actually extractable; a damaged digit must be reviewed.
-            if english_complete and korean_complete:
-                status="OK"
-            else:
-                status="REVIEW"
+            en=bool(re.search(r"Euromonitor\\s+International\\s+Limited",native,re.I)
+                    and re.search(r"Home\\s+and\\s+Garden\\s+20\\d{2}\\s+edition",native,re.I)
+                    and re.search(r"20\\d{2}\\s+data\\b",native,re.I))
+            ko_source=bool(re.search(r"세계\\s*판매\\s*1\\s*위",ko)
+                           and re.search(r"20\\d{2}\\s*에디션",ko)
+                           and re.search(r"20\\d{2}\\s*기준",ko))
+            status="OK" if en and ko_source else "REVIEW"
         if definite:
             finding=label+" 이미지 발견"
         elif hits:
