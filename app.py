@@ -16,7 +16,8 @@ from qa_report import export_p1
 from ui_labels import product_labels, display_file_table, readable_ocr_review, reviewer_status
 from reviewer_table import reviewer_html_table
 from english_pairing import find_english_counterpart
-from document_policy import evaluate_document_policy, compare_range_messages
+from document_policy import (evaluate_document_policy, compare_range_messages,
+                             evaluate_bilingual_values, evaluate_recycling_exclusivity)
 import io
 import zipfile
 import json
@@ -196,6 +197,10 @@ if st.session_state.get("qa_result"):
             for filename in all_files:
                 p1_rules.extend(evaluate_document_policy(
                     p1_matches, summaries, product_metadata, filename))
+                p1_rules.extend(evaluate_bilingual_values(
+                    p1_matches, summaries, filename))
+                p1_rules.extend(evaluate_recycling_exclusivity(
+                    p1_matches, product_metadata, filename))
             p1_rules.extend(compare_range_messages(p1_matches, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
             # Focus reviewer attention on action items; preserve the full
