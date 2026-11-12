@@ -140,10 +140,24 @@ class MarkImageTests(unittest.TestCase):
                 "label":"세계 1위 엠블럼","status":"DETECTED",
                 "bbox":[20,30,60,70],"method":"red_world_badge_pixels"}]
         clean=[{"file":"x.pdf","extracted":"테팔 세계판매 1위. Euromonitor International Limited, Home and Garden 2026 에디션, 2025 기준"}]
-        result=review_mark_rules(found,[],[{"file":"x.pdf"}],"x.pdf",clean)
+        source=[{"file":"x.pdf","raw_evidence":[{"text":
+            "Tefal world N°1 in cookware. Source: Euromonitor International Limited, Home and Garden 2026 edition, brand retail value RSP, 2025 data."}]}]
+        result=review_mark_rules(found,source,[{"file":"x.pdf"}],"x.pdf",clean)
         r=next(x for x in result if x["rule_id"]=="IMG-WORLD_NO1")
         self.assertEqual(r["status"],"OK")
         self.assertNotIn("각주 확인 필요",r["finding"])
+
+    def test_world_mark_with_no_korean_year_is_review(self):
+        found=[{"file":"x.pdf","page":1,"code":"WORLD_NO1",
+                "label":"세계 1위 엠블럼","status":"DETECTED",
+                "bbox":[20,30,60,70],"method":"world_red_panel_verified_by_raster_text"}]
+        source=[{"file":"x.pdf","raw_evidence":[{"text":
+            "Tefal world N°1 in cookware. Source: Euromonitor International Limited, Home and Garden 2026 edition, 2025 data."}]}]
+        result=review_mark_rules(found,source,[{"file":"x.pdf"}],"x.pdf",
+             [{"file":"x.pdf","extracted":"세계판매 □위. Home and Garden 2026 에디션, □□□□ 기준"}])
+        r=next(x for x in result if x["rule_id"]=="IMG-WORLD_NO1")
+        self.assertEqual(r["status"],"REVIEW")
+        self.assertIn("국문",r["finding"])
 
     def test_france_badge_only_if_manufacture_france(self):
         pdf=fitz.open()
