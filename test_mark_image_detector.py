@@ -83,6 +83,22 @@ class MarkImageTests(unittest.TestCase):
         self.assertEqual(notice["status"],"REVIEW")
         self.assertIn("분리배출",notice["finding"])
 
+    def test_green_circular_pictogram_is_visual_candidate_not_auto_approved(self):
+        pdf=fitz.open()
+        page=pdf.new_page(width=540,height=420)
+        rgb=np.full((90,90,3),255,dtype=np.uint8)
+        cv2.circle(rgb,(45,45),28,(35,105,35),-1)
+        encoded=io.BytesIO()
+        Image.fromarray(rgb).save(encoded,format="PNG")
+        page.insert_image(fitz.Rect(235,180,325,270),stream=encoded.getvalue())
+        source=pdf.tobytes()
+        pdf.close()
+        found=detect_pdf_marks(source,"recycling_shape.pdf")
+        candidates=[x for x in found if x["code"]=="RECYCLING"]
+        self.assertTrue(candidates)
+        self.assertTrue(all(x["status"]=="CANDIDATE" for x in candidates))
+        self.assertTrue(any(x["method"]=="green_circular_pixel_candidate" for x in candidates))
+
     def test_france_badge_only_if_manufacture_france(self):
         pdf=fitz.open()
         page=pdf.new_page(width=520,height=420)
