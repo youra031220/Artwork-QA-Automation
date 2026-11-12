@@ -13,7 +13,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
-from ui_labels import product_labels, display_file_table, readable_ocr_review
+from ui_labels import product_labels, display_file_table, readable_ocr_review, reviewer_status
 import io
 import zipfile
 import json
@@ -272,6 +272,8 @@ if st.session_state.get("qa_result"):
                 for entry, source in zip(display, records):
                     if "extracted" in entry:
                         entry["extracted"] = readable_ocr_review(source)
+                    if "status" in entry and "extracted" in source:
+                        entry["status"] = reviewer_status(source["status"])
                 view = pd.DataFrame(display)
                 return view.reindex(columns=list(columns)).rename(columns=columns)
 
