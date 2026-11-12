@@ -120,7 +120,7 @@ def image_mark_candidates(page, filename, metadata=None):
         nearby=[z for z in words if
                 abs(z[1]-wy0)<85 and abs(z[0]-wx0)<100]
         tokens=" ".join(z[4] for z in nearby).upper()
-        if not (re.search(r"N\\s*[°º]?\\s*1|N1",tokens)
+        if not (re.search(r"N\s*[°º]?\s*1|N1",tokens)
                 and re.search(r"COOKWARE",tokens)):
             continue
         # Candidate is centred on WORLD and includes the badge's N1 line.
