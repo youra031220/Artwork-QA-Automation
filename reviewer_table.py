@@ -55,7 +55,7 @@ def reviewer_html_table(records):
         category=_safe(record.get("문구 카테고리","미분류"))
         k_extract=_safe(record.get("국문 추출 문구"))
         e_extract=record.get("영문 추출 문구")
-        e_visible=_safe(e_extract) if e_extract else '<span class="artwork-qa-unknown">PDF 영문 미발견</span>'
+        e_visible=_safe(e_extract) if e_extract else '<span class="artwork-qa-unknown">연결된 영문 문구 미확인</span>'
         k_ref=_safe(record.get("기준 국문"))
         e_ref=_safe(record.get("기준 영문"))
         common=(
