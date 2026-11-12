@@ -112,11 +112,11 @@ class CorrectionPolicyTests(unittest.TestCase):
         ko["reference_english"]="UP TO 30% SPACE SAVING"
         self.assertEqual(evaluate_bilingual_values([ko],raw("FRENCH OTHER SOURCE"),"sample.pdf"),[])
 
-    def test_two_distinct_recycling_qualifiers_require_review(self):
+    def test_two_distinct_recycling_qualifiers_require_fail(self):
         mm=[row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능."),
             row("적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능 (유리뚜껑 제외).")]
         rr=evaluate_recycling_exclusivity(mm,[],"sample.pdf")
-        self.assertEqual(rr[0]["status"],"REVIEW")
+        self.assertEqual(rr[0]["status"],"FAIL")
         self.assertEqual(rr[0]["rule_id"],"DOC-RECYCLE-MIXED")
 
     def test_single_recycling_notice_containing_exclusion_is_not_conflict(self):
