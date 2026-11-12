@@ -113,6 +113,26 @@ class MarkImageTests(unittest.TestCase):
         self.assertTrue(all(x["status"]=="CANDIDATE" for x in candidates))
         self.assertTrue(any(x["method"]=="green_circular_pixel_candidate" for x in candidates))
 
+    def test_recycling_image_and_restored_korean_notice_are_checked_together(self):
+        found=[{"file":"x.pdf","page":1,"code":"RECYCLING",
+                "label":"재활용 마크","status":"CANDIDATE",
+                "bbox":[20,30,60,70],"method":"green_circular_pixel_candidate"}]
+        clean=[{"file":"x.pdf","extracted":"적절한 분리배출 및 적합한 시설에서 처리시 재활용 가능."}]
+        results=review_mark_rules(found,[],[{"file":"x.pdf"}],"x.pdf",clean)
+        category=next(r for r in results if r["rule_id"]=="IMG-RECYCLING")
+        self.assertNotIn("한국어 분리배출 안내 문구 확인 필요",category["finding"])
+        self.assertEqual(category["status"],"REVIEW")
+
+    def test_world_badge_plus_recovered_citation_is_source_co_presence(self):
+        found=[{"file":"x.pdf","page":1,"code":"WORLD_NO1",
+                "label":"세계 1위 엠블럼","status":"DETECTED",
+                "bbox":[20,30,60,70],"method":"red_world_badge_pixels"}]
+        clean=[{"file":"x.pdf","extracted":"테팔 세계판매 1위. Euromonitor International Limited, Home and Garden 2026 에디션, 2025 기준"}]
+        result=review_mark_rules(found,[],[{"file":"x.pdf"}],"x.pdf",clean)
+        r=next(x for x in result if x["rule_id"]=="IMG-WORLD_NO1")
+        self.assertEqual(r["status"],"OK")
+        self.assertNotIn("각주 확인 필요",r["finding"])
+
     def test_france_badge_only_if_manufacture_france(self):
         pdf=fitz.open()
         page=pdf.new_page(width=520,height=420)
