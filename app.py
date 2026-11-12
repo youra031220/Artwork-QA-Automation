@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
+from ocr_review import combine_damaged_coating
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
 from product_parser import parse_product_pdf
@@ -208,6 +209,11 @@ if st.session_state.get("qa_result"):
         b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
         c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows, raw_summaries=summaries)
+        # Re-read tightly grouped Korean claims only when native Unicode is
+        # visibly corrupted. Preserve every original extracted line in rows.
+        grouped = combine_damaged_coating(
+            grouped, rows, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
+        )
         numeric_reviews = [g for g in grouped if g.get("numeric_review")]
         if numeric_reviews:
             st.warning(
