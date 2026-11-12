@@ -123,6 +123,39 @@ def _qr_candidates(page):
     return unique
 
 
+def _recycling_pixel_candidates(page):
+    """Find plausible compact green circular recycling pictograms in pixels.
+
+    This is shape evidence, not proof of recycling semantics. Keep REVIEW.
+    Vector logos embedded in PDF still appear in the rendered raster image.
+    """
+    import cv2
+    import numpy as np
+    render_scale=min(1.15,max(0.55,1500/max(page.rect.width,page.rect.height)))
+    pix=page.get_pixmap(matrix=fitz.Matrix(render_scale,render_scale),
+                        colorspace=fitz.csRGB,alpha=False)
+    pixels=np.frombuffer(pix.samples,dtype=np.uint8).reshape(
+        pix.height,pix.width,3)
+    hsv=cv2.cvtColor(pixels,cv2.COLOR_RGB2HSV)
+    mask=cv2.inRange(hsv,np.array((30,35,20),dtype=np.uint8),
+                     np.array((95,255,240),dtype=np.uint8))
+    contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    found=[]
+    for contour in contours:
+        x,y,w,h=cv2.boundingRect(contour)
+        if not (18*render_scale <= w <= 105*render_scale and
+                18*render_scale <= h <= 105*render_scale):
+            continue
+        if not (.74<=w/h<=1.32):
+            continue
+        filled=cv2.contourArea(contour)/(w*h)
+        if not (.55<=filled<=.90):
+            continue
+        bbox=[x/render_scale,y/render_scale,(x+w)/render_scale,(y+h)/render_scale]
+        found.append(dict(bbox=bbox,method="green_circular_pixel_candidate"))
+    return sorted(found,key=lambda x:(x["bbox"][1],x["bbox"][0]))[:15]
+
+
 def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
     """Return conservative per-page mark evidence with PDF coordinates.
 
@@ -153,6 +186,11 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
                     code=code,label=dict(MARKS).get(code,"기타 QR"),
                     status="DETECTED",bbox=item["bbox"],method="qr_pixels",
                     decoded=item["decoded"],finding="QR 코드 이미지 확인됨"))
+            for candidate in _recycling_pixel_candidates(page):
+                findings.append(dict(file=filename,page=page.number+1,
+                    code="RECYCLING",label="재활용 마크",status="CANDIDATE",
+                    bbox=candidate["bbox"],method=candidate["method"],
+                    decoded="",finding="재활용 마크 형태의 녹색 원형 이미지 후보"))
             for code,label in MARKS[2:]:
                 if code=="MADE_IN_FRANCE" and metadata.get("manufacturing_country")!="FRANCE":
                     continue
