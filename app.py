@@ -1,8 +1,8 @@
 import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
-from layout import group_paragraphs
-from ocr_review import combine_damaged_coating, combine_damaged_attribution
+from layout import group_paragraphs, ensure_group_coverage
+from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
 from product_parser import parse_product_pdf
@@ -216,6 +216,10 @@ if st.session_state.get("qa_result"):
         grouped = combine_damaged_attribution(
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
+        grouped = recover_damaged_warranty(
+            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
+        )
+        grouped = ensure_group_coverage(grouped, rows)
         st.subheader("전체 문구 및 검수 결과")
         st.caption("제품별로 추출 문구와 검수 결과를 확인합니다. 확인이 필요한 항목은 마지막 열에 표시됩니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
