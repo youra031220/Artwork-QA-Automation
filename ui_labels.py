@@ -62,3 +62,19 @@ def readable_ocr_review(match):
     if best:
         return "[OCR 읽기 후보 · 확인 필요] " + re.sub(r"\s+", " ", best).strip()
     return original
+
+
+QA_STATUS_KO = {
+    "EXACT_MATCH": "기준 문구 일치",
+    "NORMALIZED_MATCH": "띄어쓰기·표기 일치",
+    "VARIABLE_MATCH": "연도 변수 일치",
+    "OCR_REVIEW": "원본 글자 확인 필요",
+    "NUMERIC_MISMATCH": "숫자·단위 확인 필요",
+    "TEXT_MISMATCH": "문구 차이 확인 필요",
+    "UNREGISTERED": "기준 문구 미등록",
+    "AMBIGUOUS_MATCH": "복수 기준 후보 확인",
+}
+
+
+def reviewer_status(code):
+    return QA_STATUS_KO.get(code, code)
