@@ -130,13 +130,15 @@ def image_mark_candidates(page, filename, metadata=None):
             bx,by,bw,bh=cv2.boundingRect(contour)
             if not (7<=bw<=55 and 2<=bh<=13 and bw/bh>=2):
                 continue
-            partners=[bar for bar in bars if 4<=bar[0]-(bx+bw)<=55
-                and abs(bar[1]-by)<=6 and .55<=bar[2]/bw<=1.65]
+            partners=[bar for bar in bars if (
+                (4<=bar[0]-(bx+bw)<=55 and abs(bar[1]-by)<=6)
+                or (abs(bar[0]-bx)<=10 and 0<=bar[1]-(by+bh)<=18))
+                and .55<=bar[2]/bw<=1.65]
             for rx,ry,rw,rh in partners[:2]:
                 bounds=fitz.Rect(
                     max(0,(bx-14)/scale),max(0,(by-26)/scale),
-                    min(page.rect.x1,(rx+rw+15)/scale),
-                    min(page.rect.y1,(by+52)/scale))
+                    min(page.rect.x1,(max(rx+rw,bx+bw)+15)/scale),
+                    min(page.rect.y1,(max(by+bh,ry+rh)+52)/scale))
                 pix=page.get_pixmap(clip=bounds,matrix=fitz.Matrix(5,5),alpha=False)
                 patch=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
                 try:
