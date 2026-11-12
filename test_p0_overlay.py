@@ -186,6 +186,20 @@ class SourceOverlayTests(unittest.TestCase):
         self.assertEqual(len(selected["rects"]), 3)
         self.assertFalse(any(rect[0] == 820 for rect in selected["rects"]))
 
+    def test_simple_reviewer_legend_and_english_pdf_evidence(self):
+        from pdf_overlay import COLORS
+        self.assertEqual(set(COLORS), {"한국어", "영문", "수치 포함", "곡선", "제품명"})
+        row = {"file": "a.pdf", "page": 1, "korean_text": "인덕션 사용 가능",
+               "status": "원본 추출 정상", "x0": 10, "y0": 10, "x1": 130,
+               "y1": 30, "raw_evidence_ids": [], "curved": False}
+        evidence = [{"file": "a.pdf", "page": 1, "raw_evidence": [
+            {"id": "p1:b1:l1", "text": "ALL HOBS + INDUCTION",
+             "bbox": [10, 40, 130, 55]},
+        ]}]
+        boxes = collect_boxes([row], [], [], "a.pdf", 1,
+                              group_view=False, raw_summaries=evidence)
+        self.assertEqual([b["kind"] for b in boxes], ["한국어", "영문"])
+        self.assertEqual(boxes[-1]["label"], "ALL HOBS + INDUCTION")
     def test_numeric_review_has_own_kind_in_list(self):
         row = {"file": "synthetic.pdf", "page": 1, "korean_text": "최대 ��% 수납",
                "status": "수치 대조 필요 · 원본 확인", "x0": 0, "y0": 0,
