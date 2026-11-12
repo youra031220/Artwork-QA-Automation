@@ -73,16 +73,6 @@ if st.session_state.get("qa_result"):
         st.error("\n".join(errors))
     if product_metadata:
         st.subheader("제품 기본정보")
-        meta_fields = [
-            "file", "range_name", "cmmf", "dossier", "product_type_raw",
-            "product_type_standard", "size_cm", "capacity_l", "has_lid",
-            "lid_material", "manufacturing_country", "induction_compatible",
-            "material", "production_agency", "parse_status"
-        ]
-        meta_table = pd.DataFrame([
-            {field: item.get(field) for field in meta_fields}
-            for item in product_metadata
-        ])
         basic_info = [{
             "제품": shown_file(item["file"]),
             "제품유형": item.get("product_type_raw") or "확인 필요",
@@ -92,45 +82,6 @@ if st.session_state.get("qa_result"):
         } for item in product_metadata]
         st.dataframe(pd.DataFrame(basic_info), use_container_width=True, hide_index=True)
         st.caption("제품명은 PDF에서 읽은 레인지명·제품유형·크기로 표시합니다. 추출 성공은 최종 검수 승인을 뜻하지 않습니다.")
-        pick_file = st.selectbox("상세 확인할 제품", [m["file"] for m in product_metadata],
-                                 format_func=shown_file, key="p0_meta_file")
-        detail = next(m for m in product_metadata if m["file"] == pick_file)
-        with st.expander("제품정보 근거·원본 파일명"):
-            st.caption(f"원본 파일명: {pick_file}")
-            evidence_rows = []
-            for field, items in detail.get("evidence", {}).items():
-                for item in items:
-                    evidence_rows.append({"field": field, **item})
-            if evidence_rows:
-                st.dataframe(pd.DataFrame(evidence_rows), hide_index=True,
-                             use_container_width=True)
-                selected_evidence = st.selectbox(
-                    "위치 미리보기",
-                    range(len(evidence_rows)),
-                    format_func=lambda i: evidence_rows[i]["field"] + ": "
-                    + evidence_rows[i].get("original_text", "")[:55],
-                    key="p0_meta_evidence"
-                )
-                entry = evidence_rows[selected_evidence]
-                original_file = next((f for f in files if f.name == pick_file), None)
-                if original_file and entry.get("bbox"):
-                    with fitz.open(stream=original_file.getvalue(), filetype="pdf") as doc:
-                        page = doc[int(entry["page"]) - 1]
-                        box = fitz.Rect(*entry["bbox"])
-                        crop = fitz.Rect(box.x0 - 25, box.y0 - 20,
-                                         box.x1 + 25, box.y1 + 20) & page.rect
-                        if not crop.is_empty:
-                            st.image(page.get_pixmap(
-                                clip=crop, matrix=fitz.Matrix(2, 2),
-                                alpha=False
-                            ).tobytes("png"), caption=entry["original_text"])
-            st.write("확인 필요:", detail["uncertain_fields"])
-        st.download_button("제품정보 CSV 다운로드",
-                           meta_table.to_csv(index=False).encode("utf-8-sig"),
-                           "p0_product_metadata.csv", mime="text/csv")
-        st.download_button("제품정보 JSON 다운로드",
-                           json.dumps(product_metadata, ensure_ascii=False, indent=2),
-                           "p0_product_metadata.json", mime="application/json")
 
     if identity_checks:
         st.subheader("포장 제품명 일치 여부")
