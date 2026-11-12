@@ -217,7 +217,7 @@ if st.session_state.get("qa_result"):
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
         st.subheader("전체 문구 및 검수 결과")
-        st.caption("추출된 문구를 한 표에서 확인합니다. 수치가 포함된 문구는 별도로 표시하며, 확인할 사항이 있을 때만 사유를 안내합니다.")
+        st.caption("제품별로 추출 문구와 검수 결과를 확인합니다. 확인이 필요한 항목은 마지막 열에 표시됩니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
         try:
             p1_master = load_p0_master()
@@ -237,7 +237,7 @@ if st.session_state.get("qa_result"):
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
             from extractor import numeric_tokens
-            shown = []
+            shown_by_file = {filename: [] for filename in all_files}
             for match in p1_matches:
                 phrase = readable_ocr_review(match)
                 has_number = bool(numeric_tokens(phrase) or match.get("numeric_review"))
@@ -251,8 +251,7 @@ if st.session_state.get("qa_result"):
                     issue = match.get("reason") or "기준 문구 확인 필요"
                 if match.get("ocr_reconstructed") and not issue:
                     issue = "원본 문구 확인 필요"
-                shown.append({
-                    "제품": shown_file(match["file"]),
+                shown_by_file[match["file"]].append({
                     "페이지": match["page"],
                     "추출 문구": phrase,
                     "문구 유형": "수치 포함" if has_number else "일반 문구",
@@ -260,12 +259,23 @@ if st.session_state.get("qa_result"):
                     "기준 국문": match.get("reference_korean", ""),
                     "확인할 사항": issue,
                 })
-            if shown:
-                st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True,
-                             column_config={"추출 문구": st.column_config.TextColumn(width="large"),
-                                            "기준 국문": st.column_config.TextColumn(width="large"),
-                                            "확인할 사항": st.column_config.TextColumn(width="medium")})
-                st.caption(f"총 {len(shown)}개 문구 · 확인 필요 {sum(bool(x['확인할 사항']) for x in shown)}개")
+            for filename in all_files:
+                product_rows = shown_by_file[filename]
+                st.markdown(f"#### {shown_file(filename)}")
+                if product_rows:
+                    st.dataframe(
+                        pd.DataFrame(product_rows), use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "추출 문구": st.column_config.TextColumn(width="large"),
+                            "기준 국문": st.column_config.TextColumn(width="large"),
+                            "확인할 사항": st.column_config.TextColumn(width="medium"),
+                        },
+                    )
+                    needing_review = sum(bool(row["확인할 사항"]) for row in product_rows)
+                    st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
+                else:
+                    st.info("이 제품에서 추출된 문구가 없습니다.")
             st.download_button("문구 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
                 "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")
