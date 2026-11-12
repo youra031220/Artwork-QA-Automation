@@ -14,6 +14,7 @@ from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
 from ui_labels import product_labels, display_file_table, readable_ocr_review, reviewer_status
+from reviewer_table import reviewer_html_table
 import io
 import zipfile
 import json
@@ -256,8 +257,8 @@ if st.session_state.get("qa_result"):
                 if match.get("ocr_reconstructed") and not issue:
                     issue = "원본 문구 확인 필요"
                 shown_by_file[match["file"]].append({
-                    "페이지": match["page"],
                     "추출 문구": phrase,
+                    "문구 카테고리": match.get("category") or "미분류",
                     "문구 유형": "수치 포함" if has_number else "일반 문구",
                     "대조 결과": ("확인 필요" if is_uncertain else reviewer_status(match["status"])),
                     "기준 국문": match.get("reference_korean", ""),
@@ -267,15 +268,7 @@ if st.session_state.get("qa_result"):
                 product_rows = shown_by_file[filename]
                 st.markdown(f"#### {shown_file(filename)}")
                 if product_rows:
-                    st.dataframe(
-                        pd.DataFrame(product_rows), use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "추출 문구": st.column_config.TextColumn(width="large"),
-                            "기준 국문": st.column_config.TextColumn(width="large"),
-                            "확인할 사항": st.column_config.TextColumn(width="medium"),
-                        },
-                    )
+                    st.markdown(reviewer_html_table(product_rows), unsafe_allow_html=True)
                     needing_review = sum(bool(row["확인할 사항"]) for row in product_rows)
                     st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
                 else:
