@@ -441,38 +441,10 @@ if st.session_state.get("qa_result"):
                     picked = boxes[item_index]
                     st.write("**원본 추출 문구**")
                     st.write(picked.get("original_label", picked["label"]))
-                    if picked.get("context_candidates"):
-                        st.write("**주변 PDF 문구 (문장 연결 미확정)**")
-                        st.write(" / ".join(picked["context_candidates"]))
-                        st.caption("주변 실제 PDF 객체이며, 숫자와 문장을 확정 결합하거나 승인한 결과가 아닙니다.")
-                    st.caption(f"출처: {picked['source']} · 상태: {picked['status']}")
+                    st.caption("문구는 오른쪽 PDF 확대 이미지에서 직접 확인할 수 있습니다.")
                     if picked.get("display_label", "").startswith("수치 대조"):
-                        st.error("수치 대조 필요: 원본 PDF의 숫자·단위와 OCR 후보를 확인하세요.")
-                    elif picked.get("display_label", "").startswith("수치 포함"):
-                        st.info("수치 포함 문구입니다. 숫자와 단위를 PDF 원본과 대조하세요. 오류로 판정된 상태는 아닙니다.")
-                    if picked["source"] == "추출 문단":
-                        related = next((
-                            g for g in grouped
-                            if g["file"] == view_file
-                            and int(g["page"]) == int(view_page)
-                            and g["paragraph"] == picked.get("original_label", picked["label"])
-                        ), None)
-                        if related and related.get("warnings"):
-                            st.write("검토 사유:", related["warnings"])
-                            st.info("읽기용 OCR 후보입니다. 승인된 원문이 아니므로 PDF와 대조하세요.")
-                            st.write("OCR 후보:", related.get("ocr_candidates", []))
-                        if related and related.get("numeric_peer_evidence"):
-                            st.write("인접 숫자 객체 후보 (문장 연결 미확정):",
-                                     related["numeric_peer_evidence"])
-                        if related and related.get("type") == "문장 연결 확인":
-                            st.warning("이 항목은 단어만 추출되어 숫자와 후속 문구를 자동 연결하지 못했습니다. 아래 확대 PDF에서 함께 확인하세요.")
-                    if picked["source"] == "원본 줄" and picked.get("line_index") is not None:
-                        original_line = rows[picked["line_index"]]
-                        if original_line.get("ocr_candidate"):
-                            st.info("읽기용 OCR 후보 (원본을 대체하지 않음):")
-                            st.write(original_line["ocr_candidate"])
-                            st.caption("PDF 원문과 후보가 다르면 사람이 원본을 확인해야 합니다.")
-                    st.caption(f"표시 박스: {sum(len(b['rects']) for b in boxes)}개")
+                        st.warning("숫자 확인이 필요합니다. 원본 PDF와 비교하세요.")
+
                 else:
                     item_index = None
                     st.info("선택한 조건에 해당하는 추출 문구가 없습니다.")
