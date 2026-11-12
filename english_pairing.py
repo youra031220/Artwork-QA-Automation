@@ -107,6 +107,23 @@ def _is_prefix(candidate, target):
     ))
 
 
+def _observed_reference_hint(korean):
+    """Narrow bilingual search hints for printed master-unregistered claims.
+
+    A hint is never output directly. The returned text must be independently
+    found in the original PDF native evidence before being displayed.
+    """
+    korean = str(korean or "")
+    if re.search(r"견고한\s*손잡이|안정적인\s*견고한\s*손잡이", korean):
+        return "UP TO 100KG - ROBUST HANDLE"
+    coating = re.search(r"테팔\s*기본\s*코팅\s*대비\s*최대\s*(\d{1,2})\s*배", korean)
+    if coating:
+        return f"UP TO {coating.group(1)}X MORE RESISTANT THAN TEFAL BASIC COATING"
+    if re.search(r"편수냄비\s*\(?\s*뚜껑\s*포함\s*\)?", korean):
+        return "SAUCEPAN WITH LID"
+    return ""
+
+
 def find_english_counterpart(match, summaries):
     """Find source English on the correct PDF page; never use master as fallback.
 
@@ -114,6 +131,8 @@ def find_english_counterpart(match, summaries):
     prefix-pruned and bounded; unrelated neighboring sentences are excluded.
     """
     reference=_reference_english(match.get("reference_english"))
+    if not reference:
+        reference=_observed_reference_hint(match.get("extracted"))
     pattern=_target_pattern(reference)
     if not pattern:
         return ""
