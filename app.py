@@ -205,9 +205,9 @@ if st.session_state.get("qa_result"):
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
-        a.metric("국문 문구 줄", len(rows))
-        b.metric("OCR 재판독", sum(x["ocr_lines"] for x in summaries))
-        c.metric("확인 필요", int((df["status"] != "원본 추출 정상").sum()))
+        a.metric("추출된 문구 줄", len(rows))
+        b.metric("업로드한 제품", len({r["file"] for r in rows}))
+        c.metric("추가 확인 항목", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows, raw_summaries=summaries)
         # Re-read tightly grouped Korean claims only when native Unicode is
         # visibly corrupted. Preserve every original extracted line in rows.
@@ -273,7 +273,7 @@ if st.session_state.get("qa_result"):
         except Exception as p1_exc:
             st.error("문구 검수 중 오류가 발생했습니다: " + str(p1_exc))
         st.subheader("PDF 문구 위치 확인")
-        st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
+        st.caption("한국어·영문·숫자·제품명 위치를 표시합니다. 문구를 선택하면 원본 위치가 확대됩니다.")
         view_files = sorted(set(
             [r["file"] for r in rows] + [r["file"] for r in identity_checks]
         ))
@@ -319,8 +319,7 @@ if st.session_state.get("qa_result"):
                     st.write("**원본 추출 문구**")
                     st.write(picked.get("original_label", picked["label"]))
                     st.caption("문구는 오른쪽 PDF 확대 이미지에서 직접 확인할 수 있습니다.")
-                    if picked.get("display_label", "").startswith("수치 대조"):
-                        st.warning("숫자 확인이 필요합니다. 원본 PDF와 비교하세요.")
+
 
                 else:
                     item_index = None
