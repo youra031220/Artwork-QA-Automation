@@ -10,7 +10,7 @@ import unicodedata
 
 _SCRIPT = re.compile(r"[가-힣\u0e00-\u0e7f\u0400-\u052f\u0600-\u06ff]")
 _WORD = re.compile(r"[A-Za-zÀ-ÿ]{2,}")
-_NUMERIC_FRAGMENT = re.compile(r"^(?:\(?\d{1,4}(?:[.,]\d+)?%?\)?|N[°º]?\d+)$", re.I)
+_NUMERIC_FRAGMENT = re.compile(r"^(?:\(?\d{1,4}(?:[.,]\d+)?%?\)?|\d{1,3}\s*[Xx]|N[°º]?\d+)$", re.I)
 
 
 def _reference_english(text):
