@@ -71,6 +71,20 @@ class MarkImageTests(unittest.TestCase):
         self.assertTrue(icons)
         self.assertTrue(all(x["status"]=="CANDIDATE" for x in icons))
 
+    def test_world_badge_requires_red_printed_panel_not_just_world_text(self):
+        pdf=fitz.open()
+        page=pdf.new_page(width=540,height=420)
+        page.draw_rect(fitz.Rect(195,165,310,240),
+                       color=(.9,0,0),fill=(.9,0,0))
+        page.insert_text((220,205),"WORLD N1",fontsize=12,color=(1,1,1))
+        source=pdf.tobytes()
+        pdf.close()
+        findings=detect_pdf_marks(source,"red.pdf")
+        world=[x for x in findings if x["code"]=="WORLD_NO1"]
+        self.assertTrue(world)
+        self.assertTrue(any(x["status"]=="DETECTED" and
+                            x["method"]=="red_world_badge_pixels" for x in world))
+
     def test_recycling_text_without_disposal_notice_is_review(self):
         pdf=fitz.open()
         page=pdf.new_page(width=520,height=420)
