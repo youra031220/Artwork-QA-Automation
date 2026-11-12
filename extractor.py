@@ -337,11 +337,11 @@ def numeric_peer_for(row, raw_lines):
                   abs(e["bbox"][0]-row["x0"])+abs(e["bbox"][1]-row["y0"]))
 
 
-def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=20):
+def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
     rows, summaries = [], []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
-        if doc.page_count > max_pages:
+        if max_pages is not None and doc.page_count > max_pages:
             raise ValueError(f"파일이 최대 페이지 수({max_pages})를 초과했습니다.")
         for page_num, page in enumerate(doc, 1):
             page_rows = 0
