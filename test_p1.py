@@ -11,6 +11,9 @@ from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
 from ui_labels import product_title, product_labels, display_file_table
+from ocr_review import combine_damaged_coating
+from unittest.mock import patch
+import fitz
 from embedded_reference import load_master
 
 
@@ -44,6 +47,59 @@ def group(text,page=1,damage=False):
     return dict(file="example.pdf",page=page,paragraph=text,numeric_review=damage,
                 line_indices=[0],source_coordinates=[
                     dict(bbox=[10,10,90,25],page=page,line_index=0)])
+
+
+class DamagedCoatingReviewTests(unittest.TestCase):
+    def test_ocr_coating_forms_one_review_item_and_keeps_native_evidence(self):
+        doc=fitz.open()
+        doc.new_page(width=900,height=1800)
+        content=doc.tobytes()
+        doc.close()
+        texts=["테팔�기본�코팅�대비�최대", "�배�더�오래가는",
+               "엑스트라�라이프�논스틱�코팅"]
+        rows=[{"file":"sample.pdf","page":1,"dir_x":-1.0} for _ in range(3)]
+        groups=[]
+        for i,text in enumerate(texts):
+            groups.append({
+                "file":"sample.pdf","page":1,"paragraph":text,
+                "line_indices":[i],"line_count":1,
+                "status":"수치 대조 필요","numeric_review":True,
+                "source_coordinates":[{"page":1,"line_index":i,
+                                       "bbox":[320,1340+i*11,420,1362+i*11]}],
+                "raw_evidence_ids":[f"p1:b{i}:l0"],
+                "numeric_tokens":[],"ocr_candidates":[],"warnings":[]
+            })
+        reading=("테팔 기본 코팅 대비 최대 4배 더 오래가는 "
+                 "엑스트라 라이프 논스틱 코팅")
+        with patch("ocr_review._ocr_coating",return_value=reading):
+            result=combine_damaged_coating(groups,rows,{"sample.pdf":content})
+        self.assertEqual(len(result),1)
+        self.assertEqual(result[0]["paragraph"],reading)
+        self.assertEqual(result[0]["original_paragraph"]," / ".join(texts))
+        self.assertTrue(result[0]["numeric_review"])
+        self.assertTrue(result[0]["ocr_reconstructed"])
+        self.assertEqual(len(result[0]["source_coordinates"]),3)
+        self.assertEqual([g["paragraph"] for g in groups],texts)
+        match=match_phrases(result,master())[0]
+        self.assertEqual(match["status"],"OCR_REVIEW")
+        self.assertEqual(match["original_extracted"]," / ".join(texts))
+
+    def test_no_ocr_result_does_not_invent_digit_or_join_groups(self):
+        doc=fitz.open()
+        doc.new_page(width=900,height=1800)
+        payload=doc.tobytes()
+        doc.close()
+        groups=[
+            {"file":"sample.pdf","page":1,"paragraph":t,
+             "line_indices":[i],"source_coordinates":[{"bbox":
+                    [320,1340+i*11,420,1362+i*11]}]}
+            for i,t in enumerate(["테팔�기본�코팅�대비�최대","�배�더�오래가는",
+                                  "엑스트라�라이프�논스틱�코팅"])
+        ]
+        rows=[dict(dir_x=-1.0) for _ in range(3)]
+        with patch("ocr_review._ocr_coating",return_value=None):
+            result=combine_damaged_coating(groups,rows,{"sample.pdf":payload})
+        self.assertEqual(result,groups)
 
 
 class ReviewerDisplayTests(unittest.TestCase):
@@ -147,6 +203,30 @@ class PhraseMatcherTests(unittest.TestCase):
         self.assertTrue(all(m["status"]=="UNREGISTERED" for m in matches))
         self.assertEqual([m["extracted"] for m in matches],
                          [r["paragraph"] for r in rows])
+
+    def test_missing_terminal_period_is_not_qr_mismatch(self):
+        m=master()
+        m["phrases"].append(dict(
+            phrase_id="PQR",category_id="사용방법",
+            korean_original="QR 코드를 스캔하여 최적의 사용 및 관리방법을 확인하세요.",
+            english_original="Get the best use & care advice",
+            approval_status="UNVERIFIED",source_row=30
+        ))
+        r=match_phrases([group("QR 코드를 스캔하여 최적의 사용 및 관리방법을 확인하세요")],m)[0]
+        self.assertEqual(r["status"],"NORMALIZED_MATCH")
+
+    def test_broken_korean_spacing_is_not_numeric_mismatch(self):
+        m=master()
+        m["phrases"].append(dict(
+            phrase_id="PC",category_id="코팅",
+            korean_original="엑스트라 라이프 논스틱 코팅",
+            english_original="EXTRA LIFE NON-STICK",
+            approval_status="UNVERIFIED",source_row=31
+        ))
+        result=match_phrases([group("엑스트라�라이프�논스틱�코팅",damage=True)],m)[0]
+        self.assertEqual(result["status"],"OCR_REVIEW")
+        self.assertNotEqual(result["differences"],"숫자·단위 불일치")
+
 
     def test_negation_is_not_passed(self):
         x=match_phrases([group("인덕션 사용 불가")],master())[0]
