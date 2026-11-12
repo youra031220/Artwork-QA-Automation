@@ -10,7 +10,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
-from ui_labels import product_title, product_labels, display_file_table
+from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review
 from ocr_review import combine_damaged_coating
 from unittest.mock import patch
 import fitz
@@ -119,6 +119,20 @@ class ReviewerDisplayTests(unittest.TestCase):
         self.assertEqual(shown[0]["제품"], mapping[meta[0]["file"]])
         self.assertNotIn("file", shown[0])
         self.assertEqual(original[0]["file"], meta[0]["file"])
+
+    def test_ocr_candidate_is_labeled_and_source_is_untouched(self):
+        row={
+            "status":"OCR_REVIEW",
+            "extracted":"쉬운�요리를�위한�강력한�코팅, 가벼운�무게",
+            "ocr_candidates":[{"text":"쉬운 요리를 위한 강력한 코팅, 가벼운 무게"}],
+        }
+        shown=readable_ocr_review(row)
+        self.assertIn("OCR 읽기 후보 · 확인 필요",shown)
+        self.assertIn("쉬운 요리를 위한",shown)
+        self.assertIn("\ufffd",row["extracted"])
+        unconfirmed=dict(row,ocr_candidates=[{"text":"불확실"}])
+        self.assertEqual(readable_ocr_review(unconfirmed),row["extracted"])
+
 
     def test_unknown_label_does_not_guess_from_filename(self):
         mapping = product_labels([dict(file="Casserole_18cm_foo.pdf",
