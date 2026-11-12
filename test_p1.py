@@ -237,7 +237,7 @@ class ReviewerDisplayTests(unittest.TestCase):
         self.assertIn("쉬운 요리를 위한",shown)
         self.assertIn("\ufffd",row["extracted"])
         unconfirmed=dict(row,ocr_candidates=[{"text":"불확실"}])
-        self.assertEqual(readable_ocr_review(unconfirmed),"원본 문구 확인 필요")
+        self.assertEqual(readable_ocr_review(unconfirmed),"쉬운□요리를□위한□강력한□코팅, 가벼운□무게")
 
 
     def test_unknown_label_does_not_guess_from_filename(self):
