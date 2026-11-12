@@ -250,9 +250,10 @@ if st.session_state.get("qa_result"):
             p1_summary = summarize_matches(p1_matches, p1_rules)
             if p1_summary:
                 st.dataframe(pd.DataFrame(shown_records(p1_summary)).rename(columns={"extracted_count": "추출 문구", "matched_count": "기준 일치", "unregistered_count": "미등록", "ocr_review_count": "글자·숫자 확인", "rule_ok": "조건 충족", "rule_review": "검토 필요", "rule_fail": "오류", "overall": "종합 결과"}), use_container_width=True, hide_index=True)
-            tab_matches, tab_rules, tab_unknown, tab_evidence = st.tabs(
-                ["정답 대조", "카테고리별 규칙", "미등록 문구", "근거·상세정보"]
+            tab_matches, tab_review, tab_rules, tab_evidence = st.tabs(
+                ["전체 문구·검수 결과", "원본 판독 확인", "검수 규칙", "근거·상세정보"]
             )
+            st.caption("전체 문구는 한 곳에서 확인합니다. 글자·숫자가 깨진 항목은 별도로 모아 원본 PDF 대조 후 검수합니다.")
             # Keep internal IDs and coordinate arrays in the evidence panel;
             # the primary tables contain only actionable reviewer information.
             match_columns = {
@@ -277,12 +278,34 @@ if st.session_state.get("qa_result"):
                 view = pd.DataFrame(display)
                 return view.reindex(columns=list(columns)).rename(columns=columns)
 
+            # One unified table: match statuses and every extracted group.
+            # OCR-damaged rows are isolated so they never look approved.
+            complete_matches = [m for m in p1_matches if m["status"] != "OCR_REVIEW"]
+            review_matches = [m for m in p1_matches if m["status"] == "OCR_REVIEW"]
             with tab_matches:
-                st.caption("실제 PDF 문구와 기준 문구를 비교합니다. 상세 좌표와 원본 파일명은 '근거·상세정보'에서 확인할 수 있습니다.")
+                st.caption(f"확인 가능한 문구 {len(complete_matches)}건 · 원본 판독 확인 {len(review_matches)}건. 미등록 문구도 포함됩니다.")
                 st.dataframe(
-                    reviewer_table(p1_matches, match_columns),
+                    reviewer_table(complete_matches, match_columns),
                     use_container_width=True, hide_index=True,
                 )
+            with tab_review:
+                st.caption("원본 문자에 손상이 있거나 숫자 확인이 필요한 문구입니다. 정답 일치로 계산하지 않습니다.")
+                if review_matches:
+                    review_display = []
+                    for item in review_matches:
+                        copy = dict(item)
+                        suggestion = readable_ocr_review(item)
+                        if "\ufffd" in suggestion:
+                            suggestion = "원본 글자 판독 필요 · 아래 근거·상세정보에서 확대 확인"
+                        copy["extracted"] = suggestion
+                        review_display.append(copy)
+                    st.dataframe(
+                        reviewer_table(review_display, match_columns),
+                        use_container_width=True, hide_index=True,
+                    )
+                else:
+                    st.success("추가 판독이 필요한 문구가 없습니다.")
+
             with tab_rules:
                 if p1_rules:
                     rule_file = st.selectbox(
@@ -296,22 +319,6 @@ if st.session_state.get("qa_result"):
                         use_container_width=True, hide_index=True,
                     )
                     st.caption("발견 횟수는 기준과 확정 매칭된 횟수이며, 서로 다른 문구 수는 중복 인쇄를 제외한 유형 수입니다. 조건 미확정은 REVIEW로 남습니다.")
-            with tab_unknown:
-                unknown = [
-                    m for m in p1_matches if m["status"] == "UNREGISTERED"
-                ]
-                st.metric("정답 데이터 미등록 문구", len(unknown))
-                if unknown:
-                    st.dataframe(
-                        reviewer_table(unknown, {
-                            "제품": "제품", "page": "페이지",
-                            "extracted": "미등록 국문",
-                            "reason": "검토 사유",
-                        }),
-                        use_container_width=True, hide_index=True,
-                    )
-                else:
-                    st.info("미등록 문구 없음. OCR 및 문장 연결 오류 여부는 별도 확인하세요.")
             with tab_evidence:
                 st.caption("기본 목록에서 생략한 내부 ID·원장 행 번호·OCR 후보·PDF 좌표를 선택한 문구에 대해서만 보여줍니다.")
                 if p1_matches:
@@ -371,6 +378,14 @@ if st.session_state.get("qa_result"):
                                 st.write(f"**{title}:**", value)
                 else:
                     st.info("상세 확인할 추출 문구가 없습니다.")
+                with st.expander("원본 줄별 추출 데이터 (확인용)", expanded=False):
+                    raw_view = pd.DataFrame(shown_records(rows)).rename(columns={
+                        "page": "페이지", "korean_text": "원본 줄",
+                        "status": "확인 상태", "ocr_candidate": "다시 읽은 후보",
+                    })
+                    st.dataframe(raw_view[["제품", "페이지", "원본 줄", "확인 상태", "다시 읽은 후보"]],
+                                 use_container_width=True, hide_index=True)
+
             st.download_button(
                 "문구 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
@@ -380,22 +395,6 @@ if st.session_state.get("qa_result"):
         except Exception as p1_exc:
             st.error("기준 문구 검수 중 오류가 발생했습니다. 추출 문구는 아래에서 확인할 수 있습니다: " + str(p1_exc))
 
-        st.subheader("PDF에서 찾은 전체 문구")
-        st.caption("PDF에서 인식한 전체 문구입니다. 기준에 등록되지 않은 문구도 제외하지 않습니다.")
-        groups_df = pd.DataFrame(grouped)
-        group_view = pd.DataFrame(shown_records(grouped)).rename(columns={
-            "page": "페이지", "type": "문구 유형",
-            "paragraph": "추출 문구", "status": "확인 상태",
-        })
-        st.dataframe(group_view[["제품", "페이지", "문구 유형", "추출 문구", "확인 상태"]],
-                     use_container_width=True, hide_index=True)
-        with st.expander("원본 줄별 추출 결과 보기"):
-            raw_view = pd.DataFrame(shown_records(rows)).rename(columns={
-                "page": "페이지", "korean_text": "원본 줄",
-                "status": "확인 상태", "ocr_candidate": "다시 읽은 문구",
-            })
-            st.dataframe(raw_view[["제품", "페이지", "원본 줄", "확인 상태", "다시 읽은 문구"]],
-                         use_container_width=True, hide_index=True)
         st.subheader("PDF 문구 위치 확인")
         st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
         view_files = sorted(set(
