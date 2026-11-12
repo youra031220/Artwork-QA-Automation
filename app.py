@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs
-from ocr_review import combine_damaged_coating
+from ocr_review import combine_damaged_coating, combine_damaged_attribution
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
 from product_parser import parse_product_pdf
@@ -213,6 +213,9 @@ if st.session_state.get("qa_result"):
         # visibly corrupted. Preserve every original extracted line in rows.
         grouped = combine_damaged_coating(
             grouped, rows, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
+        )
+        grouped = combine_damaged_attribution(
+            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
         numeric_reviews = [g for g in grouped if g.get("numeric_review")]
         if numeric_reviews:
