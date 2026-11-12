@@ -19,6 +19,7 @@ from english_pairing import find_english_counterpart
 from document_policy import (evaluate_document_policy, compare_range_messages,
                              evaluate_bilingual_values, evaluate_recycling_exclusivity)
 from policy_ui import render_policy_status
+from mark_image_detector import detect_pdf_marks, review_mark_rules, preview_mark
 import io
 import zipfile
 import json
@@ -45,7 +46,7 @@ if st.session_state.get("qa_signature") != signature:
     st.session_state["qa_signature"] = signature
 
 if st.button("문구 검수 시작", type="primary", disabled=not files):
-    rows, summaries, errors, identity_checks, product_metadata = [], [], [], [], []
+    rows, summaries, errors, identity_checks, product_metadata, mark_hits = [], [], [], [], [], []
     bar = st.progress(0)
     for index, file in enumerate(files):
         try:
@@ -53,13 +54,19 @@ if st.button("문구 검수 시작", type="primary", disabled=not files):
             rows.extend(extracted)
             summaries.extend(info)
             identity_checks.extend(check_product_identity(file.getvalue(), file.name))
-            product_metadata.append(parse_product_pdf(file.getvalue(), file.name))
+            meta = parse_product_pdf(file.getvalue(), file.name)
+            product_metadata.append(meta)
+            try:
+                mark_hits.extend(detect_pdf_marks(file.getvalue(), file.name, meta))
+            except Exception as mark_exc:
+                errors.append(f"{file.name}: 마크 이미지 검사 중 일부 실패 ({mark_exc})")
         except Exception as exc:
             errors.append(f"{file.name}: {exc}")
         bar.progress((index + 1) / len(files))
     st.session_state["qa_result"] = {
         "rows": rows, "summaries": summaries,
         "errors": errors, "identity_checks": identity_checks, "product_metadata": product_metadata,
+        "mark_hits": mark_hits,
     }
 
 if st.session_state.get("qa_result"):
@@ -68,6 +75,7 @@ if st.session_state.get("qa_result"):
         data["rows"], data["summaries"], data["errors"], data["identity_checks"]
     )
     product_metadata = data.get("product_metadata", [])
+    mark_hits = data.get("mark_hits", [])
     reviewer_labels = product_labels(product_metadata, {m["file"] for m in product_metadata} | {r["file"] for r in rows} | {c["file"] for c in identity_checks})
     def shown_file(filename):
         return reviewer_labels.get(filename, "제품정보 확인 필요")
@@ -196,6 +204,9 @@ if st.session_state.get("qa_result"):
                 p1_rules.extend(evaluate_bilingual(p1_master, p1_matches, summaries, filename))
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
             for filename in all_files:
+                p1_rules.extend(review_mark_rules(
+                    mark_hits, summaries, product_metadata, filename))
+            for filename in all_files:
                 p1_rules.extend(evaluate_document_policy(
                     p1_matches, summaries, product_metadata, filename))
                 p1_rules.extend(evaluate_bilingual_values(
@@ -262,6 +273,28 @@ if st.session_state.get("qa_result"):
                 "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")
         except Exception as p1_exc:
             st.error("문구 검수 중 오류가 발생했습니다: " + str(p1_exc))
+        st.subheader("마크·QR 이미지 확인")
+        st.caption("QR은 PDF 이미지에서 직접 찾습니다. 재활용·세계 1위·열원·제조국 마크는 인쇄된 관련 영역을 보여주며, 실제 로고인지 확인이 필요합니다.")
+        for filename in sorted({m["file"] for m in product_metadata}):
+            findings = review_mark_rules(mark_hits, summaries, product_metadata, filename)
+            if not findings:
+                continue
+            with st.expander(shown_file(filename) + " · 마크 확인", expanded=False):
+                for rule in findings:
+                    st.write("**" + rule["rule_id"].removeprefix("IMG-").replace("_", " ") + "** · " + rule["finding"])
+                    hits = rule.get("image_evidence", [])
+                    if hits:
+                        for hit in hits[:2]:
+                            try:
+                                source = next((f.getvalue() for f in files if f.name == filename), None)
+                                if source:
+                                    st.image(preview_mark(source, hit["page"], hit["bbox"]),
+                                             caption=f"{hit['label']} · PDF {hit['page']}페이지 · " +
+                                             ("QR 이미지 검출" if hit["status"] == "DETECTED" else "마크 후보 영역"),
+                                             width=280)
+                            except Exception:
+                                st.caption("이미지 미리보기 표시 실패 · 원본 PDF 확인")
+        
         st.subheader("PDF 문구 위치 확인")
         st.caption("한국어·영문·숫자·제품명 위치를 표시합니다. 문구를 선택하면 원본 위치가 확대됩니다.")
         view_files = sorted(set(
