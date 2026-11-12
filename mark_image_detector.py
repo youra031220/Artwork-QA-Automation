@@ -240,60 +240,88 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
 
 
 def review_mark_rules(findings, summaries, metadata, filename, matches=None):
-    """Mark/claim conditional checks, with no unproved image absence FAIL."""
+    """Evidence-based logo and conditional copy audit.
+
+    Candidate != confirmed logo. Missing visual evidence is REVIEW, never
+    fabricated as absence. Evaluate the corresponding copy only on a
+    positively identified emblem.
+    """
     in_file=[f for f in findings if f.get("file")==filename]
-    native=" ".join(line.get("text","") for s in summaries
-                    if s.get("file")==filename
-                    for line in s.get("raw_evidence",[]))
+    native=" ".join(str(line.get("text","")) for sm in summaries
+                    if sm.get("file")==filename
+                    for line in sm.get("raw_evidence",[]))
     ko=" ".join(str(m.get("extracted","")) for m in (matches or [])
                 if m.get("file")==filename)
+    all_text=native+" "+ko
     product=next((m for m in metadata if m.get("file")==filename),{})
+    identity=" ".join(str(product.get(k,"")) for k in
+                      ("product_type","product_name","description","range","product_type_en"))
+    lid=bool(re.search(r"glass\\s*lid|with\\s*lid|뚜껑\\s*포함|유리\\s*뚜껑",identity,re.I))
+    country=str(product.get("manufacturing_country","")).upper()
     results=[]
     for code,label in MARKS:
-        if code=="MADE_IN_FRANCE" and product.get("manufacturing_country")!="FRANCE":
+        if code=="MADE_IN_FRANCE" and country!="FRANCE":
             continue
-        hits=[f for f in in_file if f["code"]==code]
-        definite=[f for f in hits if f["status"]=="DETECTED"]
-        status="OK" if definite and code=="TEFAL_COMMITMENTS_QR" else "REVIEW"
-        # Footnotes are not visual badges. A badge must be detected in raster
-        # evidence before its bilingual attribution becomes applicable.
-        if code=="WORLD_NO1" and definite:
-            en=bool(re.search(r"Euromonitor\\s+International\\s+Limited",native,re.I)
-                    and re.search(r"Home\\s+and\\s+Garden\\s+20\\d{2}\\s+edition",native,re.I)
-                    and re.search(r"20\\d{2}\\s+data\\b",native,re.I))
-            ko_source=bool(re.search(r"세계\\s*판매\\s*1\\s*위",ko)
-                           and re.search(r"20\\d{2}\\s*에디션",ko)
-                           and re.search(r"20\\d{2}\\s*기준",ko))
-            status="OK" if en and ko_source else "REVIEW"
-        if definite:
-            finding=label+" 이미지 발견"
+        hits=[f for f in in_file if f.get("code")==code]
+        definite=[f for f in hits if f.get("status")=="DETECTED"]
+        confirmed=bool(definite)
+        status="REVIEW"
+        notes=[]
+        if confirmed:
+            status="OK"
         elif hits:
-            finding=label+" 관련 이미지 영역 확인 필요"
+            notes.append("마크 후보만 존재 · 원본 이미지 확인 필요")
         else:
-            finding=label+" 이미지 미확인 · 실제 부재로 확정 불가"
-        if code=="RECYCLING" and hits:
-            if not re.search(r"적절한\s*분리\s*배출",native+ko):
-                finding+=" · 한국어 분리배출 안내 문구 확인 필요"
-        if code=="WORLD_NO1" and hits:
-            if not re.search(r"Home\s+and\s+Garden\s+20\d{2}\s*에디션",ko,re.I) or not re.search(r"20\d{2}\s*기준",ko):
-                finding+=" · 필수 국문 Euromonitor 각주·에디션·매출연도 확인 필요"
-            if not re.search(r"Home\s+and\s+Garden\s+20\d{2}\s+edition",native,re.I) or not re.search(r"20\d{2}\s+data\b",native,re.I):
-                finding+=" · 필수 영문 Euromonitor 각주·에디션·매출연도 확인 필요"
-        if code=="INDUCTION" and not re.search(r"\bINDUCTION\b|인덕션",native,re.I):
-            continue
-        if code=="USE_CARE_QR" and not hits:
-            finding+=" · 슬리브 적용 여부에 따라 필수 여부 확인"
+            notes.append("마크 이미지 미확인 · 실제 부재 여부 확인 필요")
+        if code=="MADE_IN_FRANCE":
+            notes.append("제조국 FRANCE 조건부 필수")
+            if not confirmed:
+                status="REVIEW"
+        if code=="INDUCTION":
+            # An IH logo cannot be inferred from ALL HOBS text.
+            if re.search(r"ALL\\s+HOBS\\s+EXCEPT\\s+INDUCTION|인덕션\\s*사용\\s*불가",all_text,re.I):
+                if hits: notes.append("인덕션 사용 불가 문구와 IH 마크 후보 충돌 · 검토")
+            elif re.search(r"ALL\\s+HOBS\\s*\\+\\s*INDUCTION",all_text,re.I):
+                notes.append("인덕션 사용 가능 문구 확인 · IH 로고는 별도 이미지 검증")
+        if code=="RECYCLING" and confirmed:
+            variants=[
+                bool(re.search(r"적절한\\s*분리배출\\s*및\\s*적합한\\s*시설에서\\s*처리\\s*시?\\s*재활용\\s*가능\\.",all_text)),
+                bool(re.search(r"적절한\\s*분리배출\\s*및\\s*적합한\\s*시설에서\\s*처리\\s*시\\s*재활용\\s*가능합니다?\\.\\s*\\(유리\\s*뚜껑\\s*제외\\)",all_text))]
+            if sum(variants)!=1:
+                status="FAIL" if sum(variants)==0 else "CONFLICT"
+                notes.append("재활용 안내 문구 1종 필수 · 누락 또는 중복")
+            elif lid and not variants[1]:
+                status="REVIEW"
+                notes.append("유리뚜껑 제품: 유리뚜껑 제외 문구 필요")
+            elif not lid and variants[1]:
+                status="REVIEW"
+                notes.append("뚜껑 정보 재확인: 유리뚜껑 제외 문구 발견")
+        if code=="WORLD_NO1" and confirmed:
+            en=re.search(r"Tefal\\s+world\\s+N[°ºo]?\\s*1\\s+in\\s+cookware",native,re.I)
+            en_years=re.search(r"Home\\s+and\\s+Garden\\s+(20\\d{2})\\s+edition.*?RSP\\s*,?\\s*(20\\d{2})\\s+data",native,re.I|re.S)
+            ko_years=re.search(r"테팔\\s*세계\\s*판매\\s*1\\s*위.*?Home\\s+and\\s+Garden\\s+(20\\d{2})\\s*에디션.*?(20\\d{2})\\s*기준",all_text,re.I|re.S)
+            if not (en and en_years and ko_years):
+                status="REVIEW"
+                notes.append("국·영문 Euromonitor 출처/숫자 원본 대조 필요")
+            elif en_years.groups()!=ko_years.groups():
+                status="FAIL"
+                notes.append("영문·국문 에디션 연도 또는 기준연도 불일치")
+            else:
+                notes.append("에디션 "+en_years.group(1)+" / 매출 기준 "+en_years.group(2))
+        if code=="USE_CARE_QR" and not confirmed:
+            notes.append("사용방법 QR은 슬리브 적용 여부에 따라 필수")
         results.append(dict(
             file=filename,rule_id="IMG-"+code,category="마크·QR",
-            rule_type="IMAGE_CONDITIONAL",condition="원장·회의 조건",
-            min_count=0,max_count=None,found_occurrences=len(definite),
-            distinct_variants=len(hits),matched_phrase_ids=[],
-            review_candidates=[],applicability="APPLICABLE" if hits else "UNDETERMINED",
-            status=status,finding=finding,
+            rule_type="IMAGE_CONDITIONAL",condition="Excel 원장 + 11/09 회의",
+            min_count=1 if code=="MADE_IN_FRANCE" else 0,max_count=1,
+            found_occurrences=len(definite),distinct_variants=len(hits),
+            matched_phrase_ids=[],review_candidates=[],
+            applicability="APPLICABLE" if confirmed else "UNDETERMINED",
+            status=status,
+            finding=label+(" 이미지 확인" if confirmed else " 이미지 미확인")+" · "+" · ".join(notes),
             source_reference="PDF raster + Excel/meeting criteria",
             image_evidence=hits))
     return results
-
 
 def preview_mark(pdf_bytes, page_no, bbox, scale=3.0):
     """PNG evidence only; no files persisted."""
