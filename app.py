@@ -34,7 +34,6 @@ except Exception as exc:
     st.error("내장 검수 기준 로딩 실패: " + str(exc))
 
 OCR_DPI = 350  # 실무자 화면에서는 숨기는 검증된 기본 OCR 해상도
-page_limit = st.number_input("파일당 최대 페이지", min_value=1, max_value=100, value=20)
 signature = tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (files or []))
 if st.session_state.get("qa_signature") != signature:
     st.session_state.pop("qa_result", None)
@@ -45,7 +44,7 @@ if st.button("문구 검수 시작", type="primary", disabled=not files):
     bar = st.progress(0)
     for index, file in enumerate(files):
         try:
-            extracted, info = extract_pdf(file.getvalue(), file.name, dpi=OCR_DPI, max_pages=int(page_limit))
+            extracted, info = extract_pdf(file.getvalue(), file.name, dpi=OCR_DPI)
             rows.extend(extracted)
             summaries.extend(info)
             identity_checks.extend(check_product_identity(file.getvalue(), file.name))
