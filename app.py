@@ -217,184 +217,61 @@ if st.session_state.get("qa_result"):
         grouped = combine_damaged_attribution(
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
-        numeric_reviews = [g for g in grouped if g.get("numeric_review")]
-        if numeric_reviews:
-            st.warning(
-                f"수치 확인이 필요한 문단 {len(numeric_reviews)}건이 있습니다. "
-                "OCR 후보와 PDF 원본을 비교해야 하며 자동 승인되지 않습니다."
-            )
-        st.subheader("문구별 검수 결과")
-        st.caption("기준 문구와 비교한 결과입니다. 검토 필요 항목은 담당자가 원본과 대조해 주세요.")
+        st.subheader("전체 문구 및 검수 결과")
+        st.caption("추출된 문구를 한 표에서 확인합니다. 수치가 포함된 문구는 별도로 표시하며, 확인할 사항이 있을 때만 사유를 안내합니다.")
+        groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
         try:
             p1_master = load_p0_master()
             p1_matches = match_phrases(grouped, p1_master)
             all_files = sorted({g["file"] for g in grouped} | {m["file"] for m in product_metadata})
             p1_rules = [
-                result
-                for filename in all_files
-                for result in evaluate_rules(
-                    p1_matches, p1_master, filename,
+                result for filename in all_files
+                for result in evaluate_rules(p1_matches, p1_master, filename,
                     context={"raw_pdf_text": " ".join(
                         evidence.get("text", "")
                         for page in summaries if page.get("file") == filename
-                        for evidence in page.get("raw_evidence", [])
-                    )},
-                )
+                        for evidence in page.get("raw_evidence", []))})
             ]
             p1_rules.extend(evaluate_conditions(product_metadata, p1_matches, summaries))
             for filename in all_files:
-                p1_rules.extend(evaluate_bilingual(
-                    p1_master, p1_matches, summaries, filename
-                ))
+                p1_rules.extend(evaluate_bilingual(p1_master, p1_matches, summaries, filename))
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
-            if p1_summary:
-                st.dataframe(pd.DataFrame(shown_records(p1_summary)).rename(columns={"extracted_count": "추출 문구", "matched_count": "기준 일치", "unregistered_count": "미등록", "ocr_review_count": "글자·숫자 확인", "rule_ok": "조건 충족", "rule_review": "검토 필요", "rule_fail": "오류", "overall": "종합 결과"}), use_container_width=True, hide_index=True)
-            tab_matches, tab_review, tab_rules, tab_evidence = st.tabs(
-                ["전체 문구·검수 결과", "원본 판독 확인", "검수 규칙", "근거·상세정보"]
-            )
-            st.caption("전체 문구는 한 곳에서 확인합니다. 글자·숫자가 깨진 항목은 별도로 모아 원본 PDF 대조 후 검수합니다.")
-            # Keep internal IDs and coordinate arrays in the evidence panel;
-            # the primary tables contain only actionable reviewer information.
-            match_columns = {
-                "제품": "제품", "page": "페이지", "extracted": "PDF 추출 문구",
-                "status": "대조 결과", "category": "카테고리",
-                "reference_korean": "기준 국문", "reference_english": "기준 영문",
-                "differences": "차이점", "reason": "검토 사유",
-            }
-            rule_columns = {
-                "category": "카테고리", "rule_type": "검수 조건",
-                "found_occurrences": "발견 횟수",
-                "distinct_variants": "서로 다른 문구 수",
-                "status": "판정", "finding": "검수 결과",
-            }
-            def reviewer_table(records, columns):
-                display = shown_records(records)
-                for entry, source in zip(display, records):
-                    if "extracted" in entry:
-                        entry["extracted"] = readable_ocr_review(source)
-                    if "status" in entry and "extracted" in source:
-                        entry["status"] = reviewer_status(source["status"])
-                view = pd.DataFrame(display)
-                return view.reindex(columns=list(columns)).rename(columns=columns)
-
-            # One unified table: match statuses and every extracted group.
-            # OCR-damaged rows are isolated so they never look approved.
-            complete_matches = [m for m in p1_matches if m["status"] != "OCR_REVIEW"]
-            review_matches = [m for m in p1_matches if m["status"] == "OCR_REVIEW"]
-            with tab_matches:
-                st.caption(f"확인 가능한 문구 {len(complete_matches)}건 · 원본 판독 확인 {len(review_matches)}건. 미등록 문구도 포함됩니다.")
-                st.dataframe(
-                    reviewer_table(complete_matches, match_columns),
-                    use_container_width=True, hide_index=True,
-                )
-            with tab_review:
-                st.caption("원본 문자에 손상이 있거나 숫자 확인이 필요한 문구입니다. 정답 일치로 계산하지 않습니다.")
-                if review_matches:
-                    review_display = []
-                    for item in review_matches:
-                        copy = dict(item)
-                        suggestion = readable_ocr_review(item)
-                        if "\ufffd" in suggestion:
-                            suggestion = "원본 글자 판독 필요 · 아래 근거·상세정보에서 확대 확인"
-                        copy["extracted"] = suggestion
-                        review_display.append(copy)
-                    st.dataframe(
-                        reviewer_table(review_display, match_columns),
-                        use_container_width=True, hide_index=True,
-                    )
-                else:
-                    st.success("추가 판독이 필요한 문구가 없습니다.")
-
-            with tab_rules:
-                if p1_rules:
-                    rule_file = st.selectbox(
-                        "검수할 제품", all_files, format_func=shown_file, key="p1_rule_file"
-                    )
-                    relevant_rules = [
-                        r for r in p1_rules if r["file"] == rule_file
-                    ]
-                    st.dataframe(
-                        reviewer_table(relevant_rules, rule_columns),
-                        use_container_width=True, hide_index=True,
-                    )
-                    st.caption("발견 횟수는 기준과 확정 매칭된 횟수이며, 서로 다른 문구 수는 중복 인쇄를 제외한 유형 수입니다. 조건 미확정은 REVIEW로 남습니다.")
-            with tab_evidence:
-                st.caption("기본 목록에서 생략한 내부 ID·원장 행 번호·OCR 후보·PDF 좌표를 선택한 문구에 대해서만 보여줍니다.")
-                if p1_matches:
-                    pick = st.selectbox(
-                        "상세 확인할 문구", range(len(p1_matches)),
-                        format_func=lambda j: (
-                            f'{shown_file(p1_matches[j]["file"])} · p.{p1_matches[j]["page"]}'
-                            f' · {p1_matches[j]["status"]} · {p1_matches[j]["extracted"][:65]}'
-                        ), key="p1_evidence_item"
-                    )
-                    entry = p1_matches[pick]
-                    st.caption("원본 파일명: " + entry["file"])
-                    st.write("**검수 화면 문구:**", readable_ocr_review(entry))
-                    if entry.get("original_extracted") != entry["extracted"]:
-                        st.write("**PDF 원본 추출 (수정 전):**", entry["original_extracted"])
-                    elif entry.get("status") == "OCR_REVIEW":
-                        st.write("**PDF 원본 추출 (OCR 미확정):**", entry["extracted"])
-                    st.write("**기준 국문:**", entry["reference_korean"] or "(미등록)")
-                    st.write("**기준 영문:**", entry["reference_english"] or "(미등록)")
-                    st.write("**판정 근거:**", entry["reason"])
-                    if entry.get("differences"):
-                        st.write("**차이점:**", entry["differences"])
-                    rectangles = [
-                        pos["bbox"] for pos in entry.get("source_coordinates", [])
-                        if pos.get("bbox")
-                    ]
-                    selected_file = next(
-                        (item for item in files if item.name == entry["file"]), None
-                    )
-                    if selected_file and rectangles:
-                        crop = render_selected_crop(
-                            selected_file.getvalue(), int(entry["page"]),
-                            {"rects": rectangles, "label": entry["extracted"],
-                             "status": entry["status"]}
-                        )
-                        if crop is not None:
-                            st.image(
-                                crop, caption="PDF 원본 근거 (강조된 추출 위치)",
-                                use_container_width=True,
-                            )
-                    elif not rectangles:
-                        st.info("이 문구의 정확한 PDF 좌표가 없습니다. 원본 파일에서 직접 확인하세요.")
-                    with st.expander("기술 상세정보 · OCR 및 원장 추적", expanded=False):
-                        detail_fields = {
-                            "line_indices": "원본 줄 인덱스",
-                            "source_coordinates": "PDF 근거 좌표",
-                            "ocr_candidates": "OCR 후보",
-                            "phrase_id": "정답 문구 ID",
-                            "rule_id": "규칙 ID",
-                            "source_row": "원장 행 번호",
-                            "candidates": "추가 매칭 후보",
-                            "approval_status": "정답 데이터 승인 상태",
-                        }
-                        for field, title in detail_fields.items():
-                            value = entry.get(field)
-                            if value not in (None, "", []):
-                                st.write(f"**{title}:**", value)
-                else:
-                    st.info("상세 확인할 추출 문구가 없습니다.")
-                with st.expander("원본 줄별 추출 데이터 (확인용)", expanded=False):
-                    raw_view = pd.DataFrame(shown_records(rows)).rename(columns={
-                        "page": "페이지", "korean_text": "원본 줄",
-                        "status": "확인 상태", "ocr_candidate": "다시 읽은 후보",
-                    })
-                    st.dataframe(raw_view[["제품", "페이지", "원본 줄", "확인 상태", "다시 읽은 후보"]],
-                                 use_container_width=True, hide_index=True)
-
-            st.download_button(
-                "문구 검수 보고서 ZIP 다운로드",
+            from extractor import numeric_tokens
+            shown = []
+            for match in p1_matches:
+                phrase = readable_ocr_review(match)
+                has_number = bool(numeric_tokens(phrase) or match.get("numeric_review"))
+                is_uncertain = match["status"] in ("OCR_REVIEW", "NUMERIC_MISMATCH",
+                    "TEXT_MISMATCH", "AMBIGUOUS_MATCH", "UNREGISTERED")
+                # Do not erase the QA risk even if the re-read phrase looks clean.
+                issue = ""
+                if match["status"] == "OCR_REVIEW":
+                    issue = "원본 글자·숫자 확인 필요"
+                elif is_uncertain:
+                    issue = match.get("reason") or "기준 문구 확인 필요"
+                if match.get("ocr_reconstructed") and not issue:
+                    issue = "원본 문구 확인 필요"
+                shown.append({
+                    "제품": shown_file(match["file"]),
+                    "페이지": match["page"],
+                    "추출 문구": phrase,
+                    "문구 유형": "수치 포함" if has_number else "일반 문구",
+                    "대조 결과": ("확인 필요" if is_uncertain else reviewer_status(match["status"])),
+                    "기준 국문": match.get("reference_korean", ""),
+                    "확인할 사항": issue,
+                })
+            if shown:
+                st.dataframe(pd.DataFrame(shown), use_container_width=True, hide_index=True,
+                             column_config={"추출 문구": st.column_config.TextColumn(width="large"),
+                                            "기준 국문": st.column_config.TextColumn(width="large"),
+                                            "확인할 사항": st.column_config.TextColumn(width="medium")})
+                st.caption(f"총 {len(shown)}개 문구 · 확인 필요 {sum(bool(x['확인할 사항']) for x in shown)}개")
+            st.download_button("문구 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
-                "artwork_p1_qa_report.zip", mime="application/zip",
-                key="p1_download",
-            )
+                "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")
         except Exception as p1_exc:
-            st.error("기준 문구 검수 중 오류가 발생했습니다. 추출 문구는 아래에서 확인할 수 있습니다: " + str(p1_exc))
-
+            st.error("문구 검수 중 오류가 발생했습니다: " + str(p1_exc))
         st.subheader("PDF 문구 위치 확인")
         st.caption("문단·원본 줄·영문 제품명의 PDF 추출 좌표를 색깔 박스로 표시합니다. 항목 선택 시 해당 위치를 강조합니다.")
         view_files = sorted(set(
