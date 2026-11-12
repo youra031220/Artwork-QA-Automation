@@ -205,7 +205,7 @@ if st.session_state.get("qa_result"):
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
             for filename in all_files:
                 p1_rules.extend(review_mark_rules(
-                    mark_hits, summaries, product_metadata, filename))
+                    mark_hits, summaries, product_metadata, filename, p1_matches))
             for filename in all_files:
                 p1_rules.extend(evaluate_document_policy(
                     p1_matches, summaries, product_metadata, filename))
@@ -276,7 +276,7 @@ if st.session_state.get("qa_result"):
         st.subheader("마크·QR 이미지 확인")
         st.caption("QR은 PDF 이미지에서 직접 찾습니다. 재활용·세계 1위·열원·제조국 마크는 인쇄된 관련 영역을 보여주며, 실제 로고인지 확인이 필요합니다.")
         for filename in sorted({m["file"] for m in product_metadata}):
-            findings = review_mark_rules(mark_hits, summaries, product_metadata, filename)
+            findings = review_mark_rules(mark_hits, summaries, product_metadata, filename, p1_matches)
             if not findings:
                 continue
             with st.expander(shown_file(filename) + " · 마크 확인", expanded=False):
