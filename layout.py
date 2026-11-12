@@ -360,3 +360,40 @@ def _rebuild_storage_claim(groups, raw_summaries):
         substitutions[i] = new
         used.add(j)
     return [substitutions.get(i, group) for i,group in enumerate(groups) if i not in used]
+
+
+
+def ensure_group_coverage(groups, rows):
+    """Every raw Korean line is represented in at least one review paragraph.
+
+    Paragraph reconstruction deliberately merges lines; only genuinely
+    unreferenced lines receive a fallback row. Never filter unknown phrases.
+    """
+    used = {
+        index
+        for group in groups
+        for index in group.get("line_indices", [])
+        if isinstance(index, int) and 0 <= index < len(rows)
+    }
+    output = list(groups)
+    for index, row in enumerate(rows):
+        if index in used or not row.get("korean_text", "").strip():
+            continue
+        output.append({
+            "file": row["file"], "page": row["page"],
+            "paragraph": row["korean_text"], "type": "원본 문구",
+            "line_count": 1, "line_indices": [index],
+            "status": row.get("status", "원본 확인 필요"),
+            "warnings": list(row.get("warnings", [])),
+            "numeric_review": bool(row.get("numeric_review")),
+            "raw_evidence_ids": list(row.get("raw_evidence_ids", [])),
+            "numeric_tokens": list(row.get("native_numeric_tokens", [])),
+            "ocr_candidates": ([{"text": row["ocr_candidate"], "line_index": index}]
+                               if row.get("ocr_candidate") else []),
+            "numeric_peer_evidence": list(row.get("numeric_peer_evidence", [])),
+            "source_coordinates": [{
+                "line_index": index, "page": row["page"],
+                "bbox": [row["x0"], row["y0"], row["x1"], row["y1"]],
+            }],
+        })
+    return output
