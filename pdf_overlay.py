@@ -14,6 +14,29 @@ COLORS = {
 }
 
 
+ENGLISH_CUES = re.compile(
+    r"\b(?:ALL HOBS|INDUCTION|WORLD|COOKWARE|MADE IN|SCRATCH|NON.STICK|"
+    r"GET THE BEST|USE AND CARE|SCAN|RECYCLABLE|COATING|SPACE SAVING|"
+    r"HOME AND GARDEN|EUROMONITOR|GUARANTEED|MANUFACTURING|"
+    r"THIS PRODUCT|SUITABLE FOR|DISHWASHER|FOR ALL)\b", re.I
+)
+ENGLISH_WORDS = re.compile(
+    r"\b(?:the|and|with|for|from|your|use|care|against|on|to|of|in|"
+    r"this|than|made|please|not|more|best)\b", re.I
+)
+
+
+def _is_english_evidence(value):
+    """Avoid labeling French/German/Spanish artwork paragraphs as English."""
+    if not re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}", value):
+        return False
+    if re.search(r"[가-힣\ufffd\u0e00-\u0e7f\u0400-\u052f\u0600-\u06ff]", value):
+        return False
+    if re.match(r"^(?:CLIENT|GAMME|DOSSIER|PRODUIT|ECHELLE|BARCODE|REF\s*:)", value, re.I):
+        return False
+    return bool(ENGLISH_CUES.search(value) or len(ENGLISH_WORDS.findall(value)) >= 2)
+
+
 def _citation_rects(row, evidence):
     """Per-line observed English citation rectangles; never fabricate positions."""
     if not row.get("source_citation"):
@@ -192,13 +215,7 @@ def collect_boxes(rows, groups, identity_checks, filename, page, group_view=True
     for item in evidence.values():
         value = item.get("text", "").strip()
         bbox = item.get("bbox")
-        if not bbox or len(bbox) != 4 or re.search(r"[가-힣\ufffd]", value):
-            continue
-        if not re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}", value):
-            continue
-        if re.search(r"[\u0e00-\u0e7f\u0400-\u052f\u0600-\u06ff]", value):
-            continue
-        if re.match(r"^(?:CLIENT|GAMME|DOSSIER|PRODUIT|ECHELLE|BARCODE|REF\s*:)", value, re.I):
+        if not bbox or len(bbox) != 4 or not _is_english_evidence(value):
             continue
         output.append({
             "label": value, "kind": "영문", "display_label": "영문",
