@@ -98,12 +98,16 @@ def _one(row, master):
               and compact(p["korean_original"]) in compact(actual)]
     if contains:
         p,v=max(contains,key=lambda pair:len(pair[0]["korean_original"]))
-        return dict(base, status="NORMALIZED_MATCH" if not row.get("numeric_review") else "OCR_REVIEW",
+        damaged = bool(row.get("numeric_review") or DAMAGE.search(actual))
+        return dict(base, status="OCR_REVIEW" if damaged else "NORMALIZED_MATCH",
                     phrase_id=p["phrase_id"], rule_id=v.get("rule_id",""),
                     category=p["category_id"], reference_korean=p["korean_original"],
                     reference_english=p.get("english_original",""),
                     approval_status=p.get("approval_status","UNVERIFIED"),
-                    source_row=p.get("source_row"), reason="긴 추출 문구에 기준 문구가 포함됨")
+                    source_row=p.get("source_row"),
+                    differences="원본 일부 글자·숫자 판독 불가" if damaged else "",
+                    reason=("기준 문구 일부 일치 · 나머지 손상된 원문 확인 필요"
+                            if damaged else "긴 추출 문구에 기준 문구가 포함됨"))
     # '202X' is a per-occurrence year placeholder, not a literal number.
     # This must run before fuzzy/numeric mismatch detection.
     year_matches = [(p,v,values) for p,v in refs
