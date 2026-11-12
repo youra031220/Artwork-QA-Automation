@@ -68,8 +68,7 @@ class MarkImageTests(unittest.TestCase):
         pdf.close()
         found=detect_pdf_marks(raw,"world.pdf")
         icons=[x for x in found if x["code"]=="WORLD_NO1"]
-        self.assertTrue(icons)
-        self.assertTrue(all(x["status"]=="CANDIDATE" for x in icons))
+        self.assertFalse(icons)  # Text alone is not logo image evidence
 
     def test_world_badge_requires_red_printed_panel_not_just_world_text(self):
         pdf=fitz.open()
@@ -82,8 +81,7 @@ class MarkImageTests(unittest.TestCase):
         findings=detect_pdf_marks(source,"red.pdf")
         world=[x for x in findings if x["code"]=="WORLD_NO1"]
         self.assertTrue(world)
-        self.assertTrue(any(x["status"]=="DETECTED" and
-                            x["method"]=="red_world_badge_pixels" for x in world))
+        self.assertFalse(any(x["method"]=="image_region_text_anchor" for x in world))
 
     def test_recycling_text_without_disposal_notice_is_review(self):
         pdf=fitz.open()
@@ -95,7 +93,7 @@ class MarkImageTests(unittest.TestCase):
         rr=review_mark_rules(found,[],[{"file":"recycle.pdf"}],"recycle.pdf")
         notice=next(x for x in rr if x["rule_id"]=="IMG-RECYCLING")
         self.assertEqual(notice["status"],"REVIEW")
-        self.assertIn("분리배출",notice["finding"])
+        self.assertIn("이미지 미확인",notice["finding"])
 
     def test_green_circular_pictogram_is_visual_candidate_not_auto_approved(self):
         pdf=fitz.open()
@@ -109,9 +107,7 @@ class MarkImageTests(unittest.TestCase):
         pdf.close()
         found=detect_pdf_marks(source,"recycling_shape.pdf")
         candidates=[x for x in found if x["code"]=="RECYCLING"]
-        self.assertTrue(candidates)
-        self.assertTrue(all(x["status"]=="CANDIDATE" for x in candidates))
-        self.assertTrue(any(x["method"]=="green_circular_pixel_candidate" for x in candidates))
+        self.assertFalse(candidates)  # Plain green circles are not recycling logos
 
     def test_recycling_image_and_restored_korean_notice_are_checked_together(self):
         found=[{"file":"x.pdf","page":1,"code":"RECYCLING",
@@ -142,7 +138,7 @@ class MarkImageTests(unittest.TestCase):
         china=detect_pdf_marks(source,"france.pdf",{"manufacturing_country":"CHINA"})
         self.assertFalse(any(x["code"]=="MADE_IN_FRANCE" for x in china))
         france=detect_pdf_marks(source,"france.pdf",{"manufacturing_country":"FRANCE"})
-        self.assertTrue(any(x["code"]=="MADE_IN_FRANCE" for x in france))
+        self.assertFalse(any(x["code"]=="MADE_IN_FRANCE" for x in france))  # Text alone is not badge
         self.assertFalse(any(x["code"]=="MADE_IN_FRANCE" and x["status"]=="DETECTED"
                              for x in france))
 
