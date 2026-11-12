@@ -315,7 +315,7 @@ def candidate_quality_warnings(native, candidate):
 
 def numeric_peer_for(row, raw_lines):
     """Collect nearby standalone numeric glyphs as evidence, not auto-fixes."""
-    if not re.search(r"(?:최대|수납|절약|내구성|스테인리스)", row["korean_text"]):
+    if not re.search(r"(?:최대|수납|절약|내구성|스테인리스|세계\\s*판매|품질\\s*보증|코팅|기준|인덕션)", row["korean_text"]):
         return []
     own = fitz.Rect(row["x0"], row["y0"], row["x1"], row["y1"])
     peers = []
