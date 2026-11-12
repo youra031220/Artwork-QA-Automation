@@ -150,38 +150,35 @@ def image_mark_candidates(page, filename, metadata=None):
                     [bounds.x0,bounds.y0,bounds.x1,bounds.y1],
                     "blue_red_france_badge_pixels","DETECTED")
 
-    # INDuction: orange round IH badge, distinguish from red text/panels.
-    orange=cv2.inRange(hsv,np.array((4,95,55),dtype=np.uint8),
-                           np.array((25,255,255),dtype=np.uint8))
-    orange=cv2.morphologyEx(orange,cv2.MORPH_CLOSE,np.ones((5,5),np.uint8))
-    for x,y,cw,ch,area in _solid_color_regions(orange,16,145):
-        if not (.76<cw/ch<1.26 and .35<area/(cw*ch)<.93):
+    # IH badge: use the native lettering when available, and only accept
+    # a small, nearly circular warm-coloured badge around the glyph.
+    # Plain "ALL HOBS + INDUCTION" is not a logo.
+    warm=cv2.inRange(hsv,np.array((0,90,55),dtype=np.uint8),
+                         np.array((25,255,255),dtype=np.uint8))
+    warm |= cv2.inRange(hsv,np.array((170,90,55),dtype=np.uint8),
+                           np.array((179,255,255),dtype=np.uint8))
+    for x,y,cw,ch,area in _solid_color_regions(
+            cv2.morphologyEx(warm,cv2.MORPH_CLOSE,np.ones((3,3),np.uint8)),12,150):
+        if not (.82<=cw/ch<=1.19 and .40<=area/(cw*ch)<=.89):
             continue
-        roi=rgb[y:y+ch,x:x+cw]
-        if roi.size==0:
-            continue
-        # Inner letters/white marks must interrupt the orange disc.
-        light=(roi[:,:,0]>205)&(roi[:,:,1]>205)&(roi[:,:,2]>205)
-        inner=light[ch//4:ch*3//4,cw//4:cw*3//4].mean()
-        if inner<.055:
-            continue
-        # An orange circle is not proof of an induction icon. Require
-        # printed IH glyphs in the candidate itself before surfacing it.
         box=_rect(x,y,cw,ch,scale)
-        crop=fitz.Rect(box)&page.rect
-        from PIL import Image
+        native=_words_inside(page,box).upper()
+        # If the flattened logo has no native text, OCR the circular badge.
+        from PIL import Image,ImageOps,ImageEnhance
         import pytesseract
-        pix=page.get_pixmap(clip=crop,matrix=fitz.Matrix(5,5),alpha=False)
+        crop=fitz.Rect(box)&page.rect
+        pix=page.get_pixmap(clip=crop,matrix=fitz.Matrix(7,7),alpha=False)
         pic=Image.frombytes("RGB",(pix.width,pix.height),pix.samples)
         try:
-            glyph=pytesseract.image_to_string(pic,lang="eng",
-                       config="--oem 3 --psm 10").upper()
+            glyph=pytesseract.image_to_string(
+                ImageEnhance.Contrast(ImageOps.grayscale(pic)).enhance(2),
+                lang="eng",config="--oem 3 --psm 11").upper()
         except (pytesseract.TesseractError,pytesseract.TesseractNotFoundError):
-            continue
-        if not re.search(r"(?<![A-Z])IH(?![A-Z])",glyph):
+            glyph=""
+        if not re.search(r"(?<![A-Z])I\\s*H(?![A-Z])",native+" "+glyph):
             continue
         add("INDUCTION","인덕션 아이콘",box,
-            "orange_ih_glyph_visual_candidate")
+            "circular_warm_ih_badge","CANDIDATE")
     return results
 
 
