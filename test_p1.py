@@ -11,6 +11,7 @@ from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
 from reviewer_table import reviewer_html_table, COLUMNS
+from english_pairing import find_english_counterpart
 from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review, readable_group, readable_row
 from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from unittest.mock import patch
@@ -210,32 +211,96 @@ class EuromonitorOCRReviewTests(unittest.TestCase):
 
 
 class LongPhraseTableTests(unittest.TestCase):
-    def test_long_sentence_is_fully_visible_and_page_column_absent(self):
-        phrase=("테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 2년간 "
+    def test_long_bilingual_phrase_is_fully_visible_and_category_is_merged(self):
+        korean=("테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 2년간 "
                 "품질 보증 제도를 실시합니다. 제품 내부와 외부에 생긴 스크래치 "
                 "또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.")
+        english="ALL HOBS + INDUCTION"
         row={
-            "추출 문구": phrase,
             "문구 카테고리": "품질 보증 / 사용법",
+            "국문 추출 문구": korean,
+            "영문 추출 문구": english,
             "문구 유형": "수치 포함",
             "대조 결과": "기준 문구 일치",
-            "기준 국문": phrase,
+            "기준 국문": korean,
+            "기준 영문": english,
             "확인할 사항": "",
         }
         html=reviewer_html_table([row])
-        self.assertIn(phrase,html)
-        self.assertEqual(html.count(phrase),2)
+        self.assertIn(korean,html)
+        self.assertEqual(html.count(korean),2)
+        self.assertIn('rowspan="2"',html)
+        self.assertEqual(html.count('rowspan="2"'),4)
+        self.assertLess(html.index("<th>문구 카테고리</th>"),html.index("<th>언어</th>"))
         self.assertIn("table-layout:fixed",html)
         self.assertIn("overflow-wrap:anywhere",html)
         self.assertNotIn("<th>페이지</th>",html)
-        self.assertIn("<th>문구 카테고리</th>",html)
         self.assertEqual(sum(width for _,width in COLUMNS),100)
 
+    def test_missing_pdf_english_is_not_filled_from_workbook(self):
+        html=reviewer_html_table([{
+            "문구 카테고리":"G7 특장점",
+            "국문 추출 문구":"엑스트라 라이프 논스틱 코팅",
+            "영문 추출 문구":"",
+            "기준 국문":"엑스트라 라이프 논스틱 코팅",
+            "기준 영문":"EXTRA-LIFE NON-STICK",
+        }])
+        self.assertIn("PDF 영문 미발견",html)
+        self.assertEqual(html.count("EXTRA-LIFE NON-STICK"),1)
+
     def test_html_escapes_untrusted_pdf_content(self):
-        html=reviewer_html_table([{"추출 문구": '<script>alert("x")</script>',
-                                   "문구 카테고리":"미분류"}])
+        html=reviewer_html_table([{
+            "국문 추출 문구": '<script>alert("x")</script>',
+            "영문 추출 문구": '<img src=x onerror=alert(1)>',
+            "문구 카테고리":"미분류"
+        }])
         self.assertIn("&lt;script&gt;",html)
+        self.assertIn("&lt;img",html)
         self.assertNotIn('<script>alert("x")</script>',html)
+
+
+class EnglishEvidenceTests(unittest.TestCase):
+    def test_reference_hyphen_differs_from_pdf_but_observed_copy_shown(self):
+        match={
+            "file":"test.pdf","page":1,
+            "reference_english":"EXTRA-LIFE NON-STICK",
+        }
+        summaries=[{"file":"test.pdf","page":1,"raw_evidence":[
+            {"text":"EXTRA LIFE NON-STICK","bbox":[12,20,150,30]},
+            {"text":"ANTIADHÉSIF EXTRA LIFE","bbox":[400,20,600,30]},
+        ]}]
+        self.assertEqual(find_english_counterpart(match,summaries),
+                         "EXTRA LIFE NON-STICK")
+
+    def test_pdf_missing_english_never_uses_master_value(self):
+        match={"file":"test.pdf","page":1,
+               "reference_english":"ALL HOBS + INDUCTION"}
+        summaries=[{"file":"test.pdf","page":1,"raw_evidence":[
+            {"text":"TOUS FEUX + INDUCTION","bbox":[12,20,150,30]}
+        ]}]
+        self.assertEqual(find_english_counterpart(match,summaries),"")
+
+    def test_original_english_phrase_found_only_in_correct_document(self):
+        match={"file":"a.pdf","page":1,
+               "reference_english":"ALL HOBS + INDUCTION"}
+        summaries=[
+            {"file":"a.pdf","page":1,"raw_evidence":[
+                {"text":"ALL HOBS + INDUCTION","bbox":[10,20,150,30]}
+            ]},
+            {"file":"b.pdf","page":1,"raw_evidence":[
+                {"text":"ALL HOBS EXCEPT INDUCTION","bbox":[10,20,150,30]}
+            ]},
+        ]
+        self.assertEqual(find_english_counterpart(match,summaries),
+                         "ALL HOBS + INDUCTION")
+
+    def test_english_with_reference_or_korean_is_not_invented(self):
+        match={"file":"a.pdf","page":1,
+               "reference_english":"RECYCLABLE METAL or 재활용 가능"}
+        summaries=[{"file":"a.pdf","page":1,"raw_evidence":[
+            {"text":"RECYCLABLE METAL","bbox":[10,20,150,30]}
+        ]}]
+        self.assertEqual(find_english_counterpart(match,summaries),"RECYCLABLE METAL")
 
 class ReviewerDisplayTests(unittest.TestCase):
     def test_pdf_derived_label_and_duplicate_disambiguation(self):
