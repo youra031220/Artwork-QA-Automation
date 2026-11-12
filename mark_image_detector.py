@@ -123,6 +123,30 @@ def _qr_candidates(page):
     return unique
 
 
+def _world_badge_pixels(page, rect):
+    """Require BOTH 'WORLD' native glyphs and a compact saturated red badge.
+
+    A plain WORLD text label, even next to a logo, is not enough. A positively
+    observed red artwork panel with text inside it is a stronger pixel match.
+    """
+    import cv2
+    import numpy as np
+    rect=fitz.Rect(rect)
+    clip=fitz.Rect(rect.x0-18,rect.y0-18,
+                   rect.x1+22,rect.y1+24) & page.rect
+    if clip.is_empty:
+        return False
+    pix=page.get_pixmap(clip=clip,matrix=fitz.Matrix(1.5,1.5),
+                        colorspace=fitz.csRGB,alpha=False)
+    rgb=np.frombuffer(pix.samples,dtype=np.uint8).reshape(pix.height,pix.width,3)
+    hsv=cv2.cvtColor(rgb,cv2.COLOR_RGB2HSV)
+    red=(cv2.inRange(hsv,np.array((0,100,90),dtype=np.uint8),
+                     np.array((12,255,255),dtype=np.uint8)) |
+         cv2.inRange(hsv,np.array((170,100,90),dtype=np.uint8),
+                     np.array((179,255,255),dtype=np.uint8)))
+    return float(np.count_nonzero(red))/(red.size or 1) >= .16
+
+
 def _recycling_pixel_candidates(page):
     """Find plausible compact green circular recycling pictograms in pixels.
 
@@ -203,11 +227,17 @@ def detect_pdf_marks(pdf_bytes, filename, metadata=None, max_pixels=30_000_000):
                                 anchor.x1+35,anchor.y1+35) & page.rect
                     if r.is_empty:
                         continue
+                    is_red_badge=(code=="WORLD_NO1" and
+                                  _world_badge_pixels(page,anchor) and
+                                  bool(re.search(r"WORLD",page.get_textbox(anchor),re.I)))
                     findings.append(dict(file=filename,page=page.number+1,
-                        code=code,label=label,status="CANDIDATE",
+                        code=code,label=label,
+                        status="DETECTED" if is_red_badge else "CANDIDATE",
                         bbox=[r.x0,r.y0,r.x1,r.y1],
-                        method="image_region_text_anchor",decoded="",
-                        finding="관련 인쇄 영역 발견 · 마크 모양 확인 필요"))
+                        method=("red_world_badge_pixels" if is_red_badge
+                                else "image_region_text_anchor"),decoded="",
+                        finding=("붉은 WORLD 엠블럼 이미지 확인됨" if is_red_badge
+                                 else "관련 인쇄 영역 발견 · 마크 모양 확인 필요")))
     return findings
 
 
