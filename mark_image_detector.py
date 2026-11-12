@@ -255,10 +255,16 @@ def review_mark_rules(findings, summaries, metadata, filename, matches=None):
         hits=[f for f in in_file if f["code"]==code]
         definite=[f for f in hits if f["status"]=="DETECTED"]
         status="OK" if definite and code=="TEFAL_COMMITMENTS_QR" else "REVIEW"
-        # A verified raster world badge plus printed Euromonitor footnote
-        # satisfies only logo/source co-presence, not the year-value QA.
-        if definite and code=="WORLD_NO1" and "Euromonitor" in native+" "+ko:
-            status="OK"
+        # WORLD badge requires an actual source footnote, not just the
+        # isolated word Euromonitor elsewhere in the multilingual panel.
+        if code=="WORLD_NO1" and definite:
+            source_en=bool(re.search(r"Home\s+and\s+Garden\s+20\d{2}\s+edition",native,re.I)
+                           and re.search(r"20\d{2}\s+data\b",native,re.I)
+                           and "Euromonitor" in native)
+            source_ko=bool(re.search(r"Home\s+and\s+Garden\s+20\d{2}\s*에디션",ko,re.I)
+                           and re.search(r"20\d{2}\s*기준",ko)
+                           and "Euromonitor" in ko)
+            status="OK" if source_en and source_ko else "REVIEW"
         if definite:
             finding=label+" 이미지 발견"
         elif hits:
@@ -269,8 +275,10 @@ def review_mark_rules(findings, summaries, metadata, filename, matches=None):
             if not re.search(r"적절한\s*분리\s*배출",native+ko):
                 finding+=" · 한국어 분리배출 안내 문구 확인 필요"
         if code=="WORLD_NO1" and hits:
-            if "Euromonitor" not in native+" "+ko:
-                finding+=" · 세계 1위 출처 각주 확인 필요"
+            if not re.search(r"Home\s+and\s+Garden\s+20\d{2}\s*에디션",ko,re.I) or not re.search(r"20\d{2}\s*기준",ko):
+                finding+=" · 필수 국문 Euromonitor 각주·에디션·매출연도 확인 필요"
+            if not re.search(r"Home\s+and\s+Garden\s+20\d{2}\s+edition",native,re.I) or not re.search(r"20\d{2}\s+data\b",native,re.I):
+                finding+=" · 필수 영문 Euromonitor 각주·에디션·매출연도 확인 필요"
         if code=="INDUCTION" and not re.search(r"\bINDUCTION\b|인덕션",native,re.I):
             continue
         if code=="USE_CARE_QR" and not hits:
