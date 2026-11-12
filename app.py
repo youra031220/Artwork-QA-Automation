@@ -16,6 +16,7 @@ from qa_report import export_p1
 from ui_labels import product_labels, display_file_table, readable_ocr_review, reviewer_status
 from reviewer_table import reviewer_html_table
 from english_pairing import find_english_counterpart
+from document_policy import evaluate_document_policy, compare_range_messages
 import io
 import zipfile
 import json
@@ -192,7 +193,26 @@ if st.session_state.get("qa_result"):
             for filename in all_files:
                 p1_rules.extend(evaluate_bilingual(p1_master, p1_matches, summaries, filename))
             p1_rules.extend(inspect_symbols(summaries, product_metadata))
+            for filename in all_files:
+                p1_rules.extend(evaluate_document_policy(
+                    p1_matches, summaries, product_metadata, filename))
+            p1_rules.extend(compare_range_messages(p1_matches, product_metadata))
             p1_summary = summarize_matches(p1_matches, p1_rules)
+            # Focus reviewer attention on action items; preserve the full
+            # evidence and rule details in the existing report download.
+            blocking = [r for r in p1_rules
+                        if r.get("status") == "FAIL" and (
+                            str(r.get("rule_id", "")).startswith("DOC-") or
+                            r.get("rule_id") == "P1-HEAT-CONFLICT")]
+            if blocking:
+                st.subheader("수정이 필요한 항목")
+                for filename in all_files:
+                    for finding in blocking:
+                        if finding.get("file") == filename:
+                            st.error(f"{shown_file(filename)} · "
+                                     f"{finding.get('category', '문구')} — "
+                                     f"{finding.get('finding', '')}")
+
             from extractor import numeric_tokens
             shown_by_file = {filename: [] for filename in all_files}
             for match in p1_matches:
