@@ -110,6 +110,36 @@ def image_mark_candidates(page, filename, metadata=None):
         add("WORLD_NO1","세계 1위 엠블럼",box,
             "world_red_panel_verified_by_raster_text","DETECTED")
 
+    # Native glyphs may remain selectable inside a flattened-looking badge.
+    # Mint Calm's WORLD / N1 / IN COOKWARE are separate text objects.
+    # Confirm a compact red panel surrounding all three, not a footnote.
+    words=page.get_text("words")
+    worlds=[z for z in words if z[4].strip().upper()=="WORLD"]
+    for word in worlds:
+        wx0,wy0,wx1,wy1=word[:4]
+        nearby=[z for z in words if
+                abs(z[1]-wy0)<85 and abs(z[0]-wx0)<100]
+        tokens=" ".join(z[4] for z in nearby).upper()
+        if not (re.search(r"N\\s*[°º]?\\s*1|N1",tokens)
+                and re.search(r"COOKWARE",tokens)):
+            continue
+        # Candidate is centred on WORLD and includes the badge's N1 line.
+        region=fitz.Rect(wx0-14,wy0-18,wx1+44,wy1+66)&page.rect
+        pix=page.get_pixmap(clip=region,matrix=fitz.Matrix(2,2),
+                            colorspace=fitz.csRGB,alpha=False)
+        patch=np.frombuffer(pix.samples,dtype=np.uint8).reshape(
+            pix.height,pix.width,3)
+        phsv=cv2.cvtColor(patch,cv2.COLOR_RGB2HSV)
+        redmask=cv2.inRange(phsv,np.array((0,90,60),dtype=np.uint8),
+                                 np.array((13,255,255),dtype=np.uint8))
+        redmask |=cv2.inRange(phsv,np.array((170,90,60),dtype=np.uint8),
+                                   np.array((179,255,255),dtype=np.uint8))
+        if cv2.countNonZero(redmask)/redmask.size<.12:
+            continue
+        add("WORLD_NO1","세계 1위 엠블럼",
+            [region.x0,region.y0,region.x1,region.y1],
+            "native_world_n1_cookware_on_red_panel","DETECTED")
+
     # MADE IN FRANCE: two small BLUE/RED bars on a pale badge with FRANCE
     # underneath. Manufacturer addresses elsewhere on the page are ignored.
     country=metadata.get("manufacturing_country")
