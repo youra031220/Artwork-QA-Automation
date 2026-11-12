@@ -247,6 +247,28 @@ class PhraseMatcherTests(unittest.TestCase):
         self.assertEqual([m["extracted"] for m in matches],
                          [r["paragraph"] for r in rows])
 
+    def test_damaged_warranty_with_clean_substring_requires_review(self):
+        m=master()
+        actual=("테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 �년간 "
+                "품질 보증 제도를 실시합니다. "
+                "제품 내부와 외부에 생긴 스크래치 또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.")
+        m["phrases"].append(dict(
+            phrase_id="WARRANTY", category_id="품질 보증",
+            korean_original="제품 내부와 외부에 생긴 스크래치 또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.",
+            english_original="Your local statutory rights are not affected",
+            approval_status="UNVERIFIED", source_row=34,
+        ))
+        result=match_phrases([group(actual)],m)[0]
+        self.assertEqual(result["status"],"OCR_REVIEW")
+        self.assertNotIn("숫자·단위 불일치", result["differences"])
+        rules=evaluate_rules([result],m,"example.pdf")
+        self.assertNotIn(result["status"],("EXACT_MATCH","NORMALIZED_MATCH"))
+        self.assertEqual(result["extracted"],actual)
+
+    def test_clean_phrase_remains_match_after_damaged_counterpart_guard(self):
+        matched=match_phrases([group("인덕션 사용 가능")],master())[0]
+        self.assertEqual(matched["status"],"EXACT_MATCH")
+
     def test_missing_terminal_period_is_not_qr_mismatch(self):
         m=master()
         m["phrases"].append(dict(
