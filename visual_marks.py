@@ -102,7 +102,7 @@ def image_mark_candidates(page, filename, metadata=None):
         try:
             text=pytesseract.image_to_string(pic,lang="eng",
                        config="--oem 3 --psm 6").upper()
-        except pytesseract.TesseractError:
+        except (pytesseract.TesseractError, pytesseract.TesseractNotFoundError):
             continue
         if not (re.search(r"N[°º'’\s\\-]{0,3}1",text)
                 and re.search(r"WORLD|MONDIAL|COOKWARE",text)):
