@@ -10,6 +10,7 @@ from condition_engine import evaluate_conditions
 from bilingual_engine import evaluate_bilingual
 from symbol_detector import inspect_symbols
 from qa_report import export_p1
+from reviewer_table import reviewer_html_table, COLUMNS
 from ui_labels import product_title, product_labels, display_file_table, readable_ocr_review, readable_group, readable_row
 from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from unittest.mock import patch
@@ -207,6 +208,34 @@ class EuromonitorOCRReviewTests(unittest.TestCase):
             no_ocr=combine_damaged_attribution(groups,{"sample.pdf":pdf})
         self.assertEqual(no_ocr,groups)
 
+
+class LongPhraseTableTests(unittest.TestCase):
+    def test_long_sentence_is_fully_visible_and_page_column_absent(self):
+        phrase=("테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 2년간 "
+                "품질 보증 제도를 실시합니다. 제품 내부와 외부에 생긴 스크래치 "
+                "또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.")
+        row={
+            "추출 문구": phrase,
+            "문구 카테고리": "품질 보증 / 사용법",
+            "문구 유형": "수치 포함",
+            "대조 결과": "기준 문구 일치",
+            "기준 국문": phrase,
+            "확인할 사항": "",
+        }
+        html=reviewer_html_table([row])
+        self.assertIn(phrase,html)
+        self.assertEqual(html.count(phrase),2)
+        self.assertIn("table-layout:fixed",html)
+        self.assertIn("overflow-wrap:anywhere",html)
+        self.assertNotIn("<th>페이지</th>",html)
+        self.assertIn("<th>문구 카테고리</th>",html)
+        self.assertEqual(sum(width for _,width in COLUMNS),100)
+
+    def test_html_escapes_untrusted_pdf_content(self):
+        html=reviewer_html_table([{"추출 문구": '<script>alert("x")</script>',
+                                   "문구 카테고리":"미분류"}])
+        self.assertIn("&lt;script&gt;",html)
+        self.assertNotIn('<script>alert("x")</script>',html)
 
 class ReviewerDisplayTests(unittest.TestCase):
     def test_pdf_derived_label_and_duplicate_disambiguation(self):
