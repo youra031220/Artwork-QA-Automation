@@ -33,3 +33,32 @@ def display_file_table(records, labels, file_key="file", label="제품"):
     return [{label: labels.get(r.get(file_key), "제품정보 확인 필요"),
              **{k:v for k,v in r.items() if k != file_key}}
             for r in records]
+
+
+def readable_ocr_review(match):
+    """Presentation-only OCR hint; raw extracted bytes remain in the report.
+
+    A damaged PDF line may contain an OCR candidate that is more legible than
+    replacement glyphs. Only surface that candidate with a prominent warning
+    and sufficient overlap with the actual readable Korean characters.
+    """
+    import re
+    from difflib import SequenceMatcher
+    original = str(match.get("extracted") or "")
+    if match.get("status") != "OCR_REVIEW" or "\ufffd" not in original:
+        return original
+    anchor = re.sub(r"[^가-힣]", "", original)
+    candidates = match.get("ocr_candidates") or []
+    best = ""
+    score = 0
+    for item in candidates:
+        candidate = item.get("text", "") if isinstance(item, dict) else str(item)
+        korean = re.sub(r"[^가-힣]", "", candidate)
+        if len(korean) < 6 or len(korean) < len(anchor)*0.6:
+            continue
+        similarity = SequenceMatcher(None, anchor, korean).ratio()
+        if similarity > score and similarity >= .58:
+            best,score = candidate,similarity
+    if best:
+        return "[OCR 읽기 후보 · 확인 필요] " + re.sub(r"\s+", " ", best).strip()
+    return original
