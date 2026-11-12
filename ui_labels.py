@@ -60,8 +60,8 @@ def readable_ocr_review(match):
         if similarity > score and similarity >= .58:
             best,score = candidate,similarity
     if best:
-        return "[OCR 읽기 후보 · 확인 필요] " + re.sub(r"\s+", " ", best).strip()
-    return original
+        return re.sub(r"\s+", " ", best).strip()
+    return "원본 문구 확인 필요" if "\ufffd" in original else original
 
 
 QA_STATUS_KO = {
