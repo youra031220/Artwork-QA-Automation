@@ -1,8 +1,10 @@
 """Synthetic BUG-03 tests: no internal artwork is committed."""
 import unittest
+import fitz
 from extractor import (
     numeric_tokens, numeric_evidence_disagrees, repair_damaged_native,
-    source_citation_prefix, merge_source_citation, korean_segment, numeric_peer_for
+    source_citation_prefix, merge_source_citation, korean_segment, numeric_peer_for,
+    extract_pdf,
 )
 from layout import group_paragraphs
 
@@ -13,6 +15,20 @@ def fake_line(text):
         for i, c in enumerate(text)
     ]}]}
 
+
+class WholeDocumentPageTests(unittest.TestCase):
+    def test_default_extraction_reads_every_page_after_twenty(self):
+        document = fitz.open()
+        for number in range(23):
+            page = document.new_page(width=240, height=150)
+            page.insert_text((20, 40), "page " + str(number + 1))
+        data = document.tobytes()
+        document.close()
+        rows, summaries = extract_pdf(data, "multipage.pdf")
+        self.assertEqual(len(summaries), 23)
+        self.assertEqual(summaries[-1]["page"], 23)
+        with self.assertRaisesRegex(ValueError, "최대 페이지 수"):
+            extract_pdf(data, "multipage.pdf", max_pages=20)
 
 class NumericPipelineTests(unittest.TestCase):
     def test_ocr_does_not_insert_partial_fraction(self):
