@@ -15,8 +15,8 @@ from PIL import Image, ImageOps
 import pytesseract
 
 from ocr_batch import batch_ocr, strip_ocr
-from region_text import (find_untexted_regions, render_region, crop_box_to_pdf,
-                         direction_for, split_text_bands)
+from region_text import (find_untexted_regions, find_label_tables, render_region,
+                         crop_box_to_pdf, direction_for, split_text_bands)
 
 KOR = re.compile("[가-힣]")
 FOREIGN = re.compile(r"[A-Za-zÀ-ÿА-Яа-я]{3,}")
@@ -642,6 +642,21 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                         "curved": abs(direction[1]) > .3,
                         "broken": "\ufffd" in native,
                     })
+            # Statutory 한글표시사항 tables are out of QA scope: find them by
+            # structure and drop their native lines before any OCR.
+            label_tables = find_label_tables(page, rawdict) if mode != "native" else []
+            stats["label_tables"] = len(label_tables)
+            if label_tables:
+                def in_label_table(segment):
+                    box = fitz.Rect(min(c["bbox"][0] for c in segment["chars"]),
+                                    min(c["bbox"][1] for c in segment["chars"]),
+                                    max(c["bbox"][2] for c in segment["chars"]),
+                                    max(c["bbox"][3] for c in segment["chars"]))
+                    centre = (box.tl + box.br) / 2
+                    return any(centre in table for table in label_tables)
+                kept = [segment for segment in segments if not in_label_table(segment)]
+                stats["label_table_native_lines"] = len(segments) - len(kept)
+                segments = kept
             stats["native_seconds"] = round(time.perf_counter() - started, 3)
 
             # ---- one rendering + ONE Tesseract process for every crop ----
@@ -659,7 +674,8 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                 images.append(render_ocr_crop(page, rect, dpi, upside_down,
                                               line_text_rgb(target["line"]))
                               if not rect.is_empty else Image.new("L", (10, 10), 255))
-            regions = find_untexted_regions(page, rawdict) if mode != "native" else []
+            regions = (find_untexted_regions(page, rawdict, exclude=label_tables)
+                       if mode != "native" else [])
             region_images = [render_region(page, region, dpi) for region in regions]
             stats["render_seconds"] = round(time.perf_counter() - render_started, 3)
             stats["damaged_lines"] = len(targets)
@@ -929,6 +945,7 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                 "file": filename, "page": page_num,
                 "korean_lines": page_rows, "ocr_lines": ocr_lines,
                 "ocr_stats": stats, "ocr_warnings": warnings_page,
+                "excluded_label_tables": [[round(v, 1) for v in table] for table in label_tables],
                 "raw_evidence": raw_lines,
             })
     finally:

@@ -111,3 +111,39 @@ class LedgerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LabelTableExclusionTests(unittest.TestCase):
+    """한글표시사항 tables are recognised by structure and excluded."""
+
+    @staticmethod
+    def _page(rows, with_text=True):
+        import fitz
+        document = fitz.open()
+        page = document.new_page(width=600, height=400)
+        x0, x1, top = 100, 300, 60
+        for index in range(rows + 1):
+            y = top + index * 12
+            page.draw_line((x0, y), (x1, y), width=.4)
+        for x in (x0, 160, x1):
+            page.draw_line((x, top), (x, top + rows * 12), width=.4)
+        if with_text:
+            for index in range(rows):
+                page.insert_text((104, top + index * 12 + 9), "Label field text value", fontsize=7)
+        page.insert_text((100, 300), "Marketing claim outside the table", fontsize=9)
+        return document, page
+
+    def test_ruled_grid_with_lettering_is_a_label_table(self):
+        from region_text import find_label_tables
+        document, page = self._page(rows=10)
+        tables = find_label_tables(page, page.get_text("rawdict", flags=0))
+        self.assertEqual(len(tables), 1)
+        import fitz
+        self.assertNotIn(fitz.Point(110, 300), tables[0])   # other copy stays in scope
+
+    def test_few_rules_or_no_lettering_is_not_a_label_table(self):
+        from region_text import find_label_tables
+        document, page = self._page(rows=4)
+        self.assertEqual(find_label_tables(page, page.get_text("rawdict", flags=0)), [])
+        document, page = self._page(rows=10, with_text=False)
+        self.assertEqual(find_label_tables(page, page.get_text("rawdict", flags=0)), [])

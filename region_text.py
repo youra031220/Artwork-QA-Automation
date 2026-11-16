@@ -108,8 +108,83 @@ def _overlaps_text(rect, text_boxes):
     return covered > .5 * area
 
 
-def find_untexted_regions(page, rawdict):
-    """Return candidate regions: dicts with rect, kind and rotation."""
+def _glyph_paths(drawings):
+    glyphs = []
+    for drawing in drawings:
+        if "f" not in str(drawing.get("type", "")):
+            continue
+        rect = fitz.Rect(drawing["rect"])
+        if not (.8 <= rect.height <= MAX_GLYPH_HEIGHT and rect.width <= MAX_GLYPH_WIDTH):
+            continue
+        if len(drawing.get("items", [])) < 2:
+            continue
+        glyphs.append(rect)
+    return glyphs
+
+
+def find_label_tables(page, rawdict, drawings=None):
+    """Statutory label tables (한글표시사항: 제품명/제조자/원산지/수입원/주소/
+    품질보증기간/주의사항 ...) are OUT OF SCOPE for phrase QA.
+
+    They are recognised by STRUCTURE, not by fixed coordinates: a ruled grid
+    of short stroked cell borders (>= 8 distinct row rules and >= 2 column
+    rules, each segment shorter than a dieline) enclosing dense lettering
+    (>= 60 outline glyphs or >= 20 native text characters). Pictogram boxes
+    and packaging panels have few rules; glyphs are filled, not stroked.
+    """
+    drawings = page.get_cdrawings() if drawings is None else drawings
+    horizontal, vertical = [], []
+    for drawing in drawings:
+        # Cell borders are simple stroked single segments. Glyph outlines
+        # are FILLED paths and dielines are much longer, so neither counts.
+        items = drawing.get("items", [])
+        if drawing.get("type") != "s" or len(items) != 1 or items[0][0] != "l":
+            continue
+        segment = fitz.Rect(fitz.Point(items[0][1]), fitz.Point(items[0][2])).normalize()
+        if segment.height < .6 and 10 <= segment.width <= 300:
+            horizontal.append(segment)
+        elif segment.width < .6 and 5 <= segment.height <= 300:
+            vertical.append(segment)
+    glyphs = _glyph_paths(drawings)
+    native = []
+    for block in rawdict.get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                for char in span.get("chars", []):
+                    if char["c"].strip():
+                        native.append(fitz.Rect(char["bbox"]))
+    grids = [rect for rect, _ in _cluster([s + (-.5, -.5, .5, .5) for s in horizontal + vertical], 3, 3)]
+    # Columns of one table can be separate rule clusters: join close ones.
+    grids = [rect for rect, _ in _cluster(grids, 12, 12)]
+    tables = []
+    for rect in grids:
+        if not (40 <= rect.width <= 500 and 30 <= rect.height <= 400):
+            continue
+        area = rect + (-2, -2, 2, 2)
+        rows = {round(s.y0) for s in horizontal if s in area}
+        cols = {round(s.x0) for s in vertical if s in area}
+        # A label table has many row rules (one per field); pictogram
+        # boxes and packaging panels have only a few.
+        if len(rows) < 8 or len(cols) < 2:
+            continue
+        lettering = sum(1 for g in glyphs if g in area)
+        native_chars = sum(1 for c in native if c in area)
+        if lettering >= 60 or native_chars >= 20:
+            tables.append(area)
+    return tables
+
+
+def find_untexted_regions(page, rawdict, exclude=None):
+    """Return candidate regions: dicts with rect, kind and rotation.
+
+    Regions inside an excluded area (statutory label tables) are dropped
+    before any rendering or OCR.
+    """
+    exclude = list(exclude or [])
+
+    def excluded(rect):
+        return any((rect & area).get_area() > .5 * rect.get_area() for area in exclude)
+
     text_boxes = _text_layer_boxes(rawdict)
     glyphs = []
     for drawing in page.get_cdrawings():
@@ -129,7 +204,7 @@ def find_untexted_regions(page, rawdict):
     blocks = [rect for rect, _ in _cluster([b + (-3, -3, 3, 3) for b in blocks], 0, 0)]
     for rect in blocks:
         rect = rect & page.rect
-        if rect.is_empty or _overlaps_text(rect, text_boxes):
+        if rect.is_empty or _overlaps_text(rect, text_boxes) or excluded(rect):
             continue
         glyph_count = sum(1 for glyph in glyphs if glyph in rect)
         regions.append({"rect": rect, "kind": "vector", "glyphs": glyph_count,
@@ -144,7 +219,7 @@ def find_untexted_regions(page, rawdict):
     for rect, _ in _cluster(images, 1, 1):
         if rect.width > MAX_IMAGE_SIDE or rect.height > MAX_IMAGE_SIDE:
             continue
-        if _overlaps_text(rect, text_boxes):
+        if _overlaps_text(rect, text_boxes) or excluded(rect):
             continue
         if any((rect & region["rect"]).get_area() > .5 * rect.get_area() for region in regions):
             continue

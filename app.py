@@ -137,6 +137,7 @@ if st.session_state.get("qa_result"):
             line_reread = stats.get("line_reread") or {}
             timing_rows.append({
                 "제품": shown_file(page_info["file"]), "페이지": page_info["page"],
+                "제외한 한글표시사항 표": stats.get("label_tables", 0),
                 "손상 문구 줄": stats.get("damaged_lines", 0),
                 "이미지·벡터 후보 영역": stats.get("regions", 0),
                 "이미지·벡터에서 찾은 한국어 행": stats.get("region_rows", 0),
@@ -154,7 +155,9 @@ if st.session_state.get("qa_result"):
             })
         if timing_rows:
             st.dataframe(pd.DataFrame(timing_rows), use_container_width=True, hide_index=True)
-        st.caption("OCR 해상도 350 DPI. 같은 PDF 내용을 다시 검수하면 저장된 추출 결과를 재사용합니다.")
+        st.caption("OCR 해상도 350 DPI. 같은 PDF 내용을 다시 검수하면 저장된 추출 결과를 재사용합니다. "
+                   "한글표시사항(제조자·원산지·수입원·주소·품질보증기간·주의사항 등 법정 표시) 표는 "
+                   "표 구조로 자동 인식해 문구 검수와 OCR 대상에서 제외합니다.")
     if product_metadata:
         st.subheader("제품 기본정보")
         basic_info = [{
