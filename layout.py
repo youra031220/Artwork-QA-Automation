@@ -425,8 +425,16 @@ def join_wrapped_storage_sentences(groups):
                 continue
             # Same printed paragraph: next line directly below, same left
             # column, not a similarly worded claim elsewhere on packaging.
-            if not (0 <= float(bb[1]) - float(ab[1]) <= 42 and
-                    abs(float(bb[0]) - float(ab[0])) <= 65):
+            # In this artwork the Korean text begins at the far right of
+            # a multilingual first line, then wraps to the LEFT margin.
+            # Horizontal proximity is therefore invalid. Require consecutive
+            # extracted Korean lines and a small downward baseline shift.
+            left_ids = first.get("line_indices") or []
+            right_ids = second.get("line_indices") or []
+            if not (left_ids and right_ids and
+                    isinstance(left_ids[-1], int) and isinstance(right_ids[0], int)
+                    and right_ids[0] == left_ids[-1] + 1 and
+                    0 <= float(bb[1]) - float(ab[1]) <= 30):
                 continue
             merged = copy.deepcopy(first)
             merged["paragraph"] = a.rstrip() + " " + b.lstrip()
