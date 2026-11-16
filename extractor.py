@@ -109,7 +109,7 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
         return ""
     pix = page.get_pixmap(
         clip=rect,
-        matrix=fitz.Matrix(min(dpi, 180) / 72, min(dpi, 180) / 72),
+        matrix=fitz.Matrix(dpi / 72, dpi / 72),
         alpha=False,
     )
     image = Image.open(io.BytesIO(pix.tobytes("png")))
