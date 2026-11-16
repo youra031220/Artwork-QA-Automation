@@ -397,3 +397,46 @@ def ensure_group_coverage(groups, rows):
             }],
         })
     return output
+
+def join_wrapped_storage_sentences(groups):
+    """Join physically adjacent Korean storage-claim lines after OCR recovery.
+
+    Preserve each source line and coordinates; never invent missing digits.
+    Handles lines embedded in multilingual PDF text objects.
+    """
+    import copy
+    output = list(groups)
+    removed = set()
+    for i, first in enumerate(output):
+        if i in removed:
+            continue
+        a = str(first.get("paragraph", ""))
+        if not re.search(r"최대\s*(?:[0-9]{1,3}|[\ufffd□埾基]{1,5})\s*%\s*수납\s*$", a):
+            continue
+        for j, second in enumerate(output):
+            if i == j or j in removed or first.get("file") != second.get("file") or first.get("page") != second.get("page"):
+                continue
+            b = str(second.get("paragraph", ""))
+            if not re.match(r"^공간\s*[\ufffd□埑]*\s*절약\b", b):
+                continue
+            ab = (first.get("source_coordinates") or [{}])[-1].get("bbox", [])
+            bb = (second.get("source_coordinates") or [{}])[0].get("bbox", [])
+            if len(ab) != 4 or len(bb) != 4:
+                continue
+            # Same printed paragraph: next line directly below, same left
+            # column, not a similarly worded claim elsewhere on packaging.
+            if not (0 <= float(bb[1]) - float(ab[1]) <= 42 and
+                    abs(float(bb[0]) - float(ab[0])) <= 65):
+                continue
+            merged = copy.deepcopy(first)
+            merged["paragraph"] = a.rstrip() + " " + b.lstrip()
+            for key in ("line_indices", "source_coordinates", "raw_evidence_ids", "ocr_candidates", "numeric_peer_evidence"):
+                merged[key] = list(first.get(key) or []) + list(second.get(key) or [])
+            merged["line_count"] = len(merged["line_indices"])
+            merged["numeric_review"] = bool(first.get("numeric_review") or second.get("numeric_review"))
+            merged["warnings"] = list(dict.fromkeys(list(first.get("warnings") or []) + list(second.get("warnings") or [])))
+            merged["type"] = "줄바꿈 연결 문구"
+            output[i] = merged
+            removed.add(j)
+            break
+    return [g for i, g in enumerate(output) if i not in removed]
