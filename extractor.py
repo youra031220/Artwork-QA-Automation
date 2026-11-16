@@ -163,17 +163,42 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
 
 
 def repair_damaged_native(native, candidate):
-    """Never splice OCR numbers into native text.
+    """Use a second OCR reading only for directly aligned damaged numeric glyphs.
 
-    The previous regex copied only the last portion of a fraction into an
-    unrelated replacement glyph (18/10 -> ...10...), producing false claims.
-    Preserve the source and present OCR only as review evidence.
+    Require a single numeric hole, unchanged readable Korean context, and a
+    matching unit. Keep the original PDF text and numeric_review=True in the
+    caller. Do not fill values from the master or other-language captions.
     """
-    if "\ufffd" not in native or not candidate:
+    if "\\ufffd" not in native or not candidate:
         return native, []
-    # Even readable matching numbers do not authorize replacing a damaged
-    # interval without a verified character-to-rectangle alignment.
-    return native, ["OCR 후보 분리 보존"]
+    # A line with several damaged numbers is ambiguous: keep OCR as evidence.
+    holes = list(re.finditer(
+        r"\\ufffd{1,5}\\s*/\\s*\\ufffd{1,5}(?=\\s*스테인리스)|"
+        r"\\ufffd{1,5}(?=\\s*(?:%|배|년|개|위)\\b|\\s*%)", native))
+    if len(holes) != 1:
+        return native, ["OCR 후보 분리 보존"]
+    hole = holes[0]
+    before, after = native[:hole.start()], native[hole.end():]
+    # Compare meaningful readable Korean anchors on either side, avoiding
+    # substitutions into unrelated text printed nearby.
+    anchors = re.findall(r"[가-힣]{2,}", before + " " + after)
+    if not anchors or not any(word in candidate for word in anchors):
+        return native, ["OCR 후보 분리 보존"]
+    if "/" in hole.group():
+        observed = re.findall(r"(?<!\\d)(\\d{1,2}\\s*/\\s*\\d{1,2})(?=\\s*스테인리스)", candidate)
+    else:
+        unit = re.match(r"\\s*(%|배|년|개|위)", after)
+        if not unit:
+            return native, ["OCR 후보 분리 보존"]
+        observed = re.findall(
+            r"(?<!\\d)(\\d{1,3})\\s*" + re.escape(unit.group(1)), candidate)
+    values = {re.sub(r"\\s+", "", x) for x in observed}
+    if len(values) != 1:
+        return native, ["OCR 후보 분리 보존"]
+    value = next(iter(values))
+    # Reject OCR numbers that disagree with any intact same-unit native value.
+    updated = before + value + after
+    return updated, ["OCR 숫자 복원 후보 · 인쇄 영역 2차 판독 · 최종 확인 필요"]
 
 
 # A numeric qualifier with Korean units is not a damaged number.
