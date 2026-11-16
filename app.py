@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
-from layout import group_paragraphs, ensure_group_coverage
+from layout import group_paragraphs, ensure_group_coverage, join_wrapped_storage_sentences
 from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
@@ -234,6 +234,7 @@ if st.session_state.get("qa_result"):
             grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
         )
         grouped = ensure_group_coverage(grouped, rows)
+        grouped = join_wrapped_storage_sentences(grouped)
         st.subheader("전체 문구 및 검수 결과")
         st.caption("제품별로 모든 한국어 문구를 확인합니다. 여러 줄로 인쇄된 한 문장은 하나로 묶어 표시하며, 확인할 사항은 마지막 열에 표시됩니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
