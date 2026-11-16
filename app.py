@@ -320,6 +320,14 @@ if st.session_state.get("qa_result"):
             shown_by_file = {filename: [] for filename in all_files}
             for match in p1_matches:
                 phrase, numeric_problem = clean_numeric_reading(match)
+                # The numeric-only gate does not catch corrupted spaces and
+                # other nonnumeric Unicode replacement glyphs.
+                if not numeric_problem and ("\ufffd" in phrase or "□" in phrase):
+                    ocr_reading = readable_ocr_review(match)
+                    if ocr_reading and not any(c in ocr_reading for c in ("\ufffd", "□")):
+                        phrase = ocr_reading
+                    else:
+                        numeric_problem = "OCR 글자 판독 불확실 · 원본 PDF 확인 필요"
                 if numeric_problem:
                     excluded_by_file[match["file"]].append(numeric_problem)
                     continue
@@ -357,10 +365,10 @@ if st.session_state.get("qa_result"):
                     st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
                 if excluded_by_file[filename]:
                     st.warning(
-                        f"숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구는 "
+                        f"글자·숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구는 "
                         "정상 추출 결과에서 제외했습니다. PDF 원본 확인이 필요합니다."
                     )
-                    with st.expander("숫자 재검증 실패 항목 · 원본 확인 필요"):
+                    with st.expander("글자·숫자 재검증 실패 항목 · 원본 확인 필요"):
                         for issue in excluded_by_file[filename]:
                             st.write(issue)
                 else:
