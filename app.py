@@ -400,14 +400,20 @@ if st.session_state.get("qa_result"):
                     else:
                         numeric_problem = "OCR 글자 판독 불확실 · 원본 PDF 확인 필요"
                 if numeric_problem:
+                    # Never silently drop a printed Korean phrase from QA.
+                    # Keep the original evidence visible, but do not approve it.
                     excluded_by_file[match["file"]].append(numeric_problem)
-                    continue
+                    phrase = str(match.get("paragraph") or phrase)
+                    if not phrase.strip():
+                        phrase = "[PDF 추출 불확실 · 원본 위치 확인 필요]"
                 has_number = bool(numeric_tokens(phrase) or match.get("numeric_review"))
                 is_uncertain = match["status"] in ("OCR_REVIEW", "NUMERIC_MISMATCH",
                     "TEXT_MISMATCH", "AMBIGUOUS_MATCH", "UNREGISTERED")
                 # Do not erase the QA risk even if the re-read phrase looks clean.
                 issue = ""
-                if match["status"] == "OCR_REVIEW":
+                if numeric_problem:
+                    issue = "PDF 원문 판독 불확실 · " + str(numeric_problem)
+                elif match["status"] == "OCR_REVIEW":
                     issue = "원본 글자·숫자 확인 필요"
                 elif is_uncertain:
                     issue = match.get("reason") or "기준 문구 확인 필요"
@@ -415,7 +421,7 @@ if st.session_state.get("qa_result"):
                     issue = "원본 문구 확인 필요"
                 verdict, reviewer_issue = render_policy_status(
                     match, p1_rules,
-                    "확인 필요" if is_uncertain else reviewer_status(match["status"]),
+                    "확인 필요" if (is_uncertain or numeric_problem) else reviewer_status(match["status"]),
                     issue)
                 shown_by_file[match["file"]].append({
                     "국문 추출 문구": phrase,
@@ -436,8 +442,8 @@ if st.session_state.get("qa_result"):
                     st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
                 if excluded_by_file[filename]:
                     st.warning(
-                        f"글자·숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구는 "
-                        "정상 추출 결과에서 제외했습니다. PDF 원본 확인이 필요합니다."
+                        f"글자·숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구를 "
+                        "검수표에 확인 필요로 표시했습니다. PDF 원본 확인이 필요합니다."
                     )
                     with st.expander("글자·숫자 재검증 실패 항목 · 원본 확인 필요"):
                         for issue in excluded_by_file[filename]:
