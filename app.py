@@ -93,6 +93,10 @@ except Exception as exc:
     st.error("내장 검수 기준 로딩 실패: " + str(exc))
 
 OCR_DPI = 350  # 실무자 화면에서는 숨기는 검증된 기본 OCR 해상도
+@st.cache_data(show_spinner=False, max_entries=12)
+def cached_extract_pdf(pdf_bytes, filename, dpi):
+    return extract_pdf(pdf_bytes, filename, dpi=dpi)
+
 signature = tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (files or []))
 if st.session_state.get("qa_signature") != signature:
     st.session_state.pop("qa_result", None)
@@ -106,7 +110,7 @@ if st.button("문구 검수 시작", type="primary", disabled=not files):
         with st.status(f"{filename} · PDF 검수 진행 중", expanded=True) as run_status:
             try:
                 st.write("1/3 PDF 문구 추출 및 OCR 처리 중")
-                extracted, info = extract_pdf(file.getvalue(), filename, dpi=OCR_DPI)
+                extracted, info = cached_extract_pdf(file.getvalue(), filename, OCR_DPI)
                 rows.extend(extracted)
                 summaries.extend(info)
                 st.write("2/3 제품 식별 정보 확인 중")
@@ -232,20 +236,9 @@ if st.session_state.get("qa_result"):
         b.metric("업로드한 제품", len({r["file"] for r in rows}))
         c.metric("추가 확인 항목", int((df["status"] != "원본 추출 정상").sum()))
         grouped = group_paragraphs(rows, raw_summaries=summaries)
-        # Re-read tightly grouped Korean claims only when native Unicode is
-        # visibly corrupted. Preserve every original extracted line in rows.
-        grouped = combine_damaged_coating(
-            grouped, rows, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
-        )
-        grouped = combine_damaged_attribution(
-            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
-        )
-        grouped = recover_damaged_warranty(
-            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
-        )
-        grouped = repair_korean_world_years(
-            grouped, {f.name: f.getvalue() for f in files}, dpi=OCR_DPI
-        )
+        # OCR has already been performed once on damaged native text by
+        # extract_pdf(). Do not run four more PDF raster OCR passes here.
+        # Preserve uncertain glyphs for manual verification instead.
         grouped = ensure_group_coverage(grouped, rows)
         grouped = join_wrapped_storage_sentences(grouped)
         st.subheader("전체 문구 및 검수 결과")
