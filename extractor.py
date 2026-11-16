@@ -169,12 +169,12 @@ def repair_damaged_native(native, candidate):
     matching unit. Keep the original PDF text and numeric_review=True in the
     caller. Do not fill values from the master or other-language captions.
     """
-    if "\\ufffd" not in native or not candidate:
+    if "\ufffd" not in native or not candidate:
         return native, []
     # A line with several damaged numbers is ambiguous: keep OCR as evidence.
     holes = list(re.finditer(
-        r"\\ufffd{1,5}\\s*/\\s*\\ufffd{1,5}(?=\\s*스테인리스)|"
-        r"\\ufffd{1,5}(?=\\s*(?:%|배|년|개|위)\\b|\\s*%)", native))
+        r"\ufffd{1,5}\s*/\s*\ufffd{1,5}(?=\s*스테인리스)|"
+        r"\ufffd{1,5}(?=\s*(?:%|배|년|개|위)\b|\s*%)", native))
     if len(holes) != 1:
         return native, ["OCR 후보 분리 보존"]
     hole = holes[0]
@@ -185,14 +185,14 @@ def repair_damaged_native(native, candidate):
     if not anchors or not any(word in candidate for word in anchors):
         return native, ["OCR 후보 분리 보존"]
     if "/" in hole.group():
-        observed = re.findall(r"(?<!\\d)(\\d{1,2}\\s*/\\s*\\d{1,2})(?=\\s*스테인리스)", candidate)
+        observed = re.findall(r"(?<!\d)(\d{1,2}\s*/\s*\d{1,2})(?=\s*스테인리스)", candidate)
     else:
-        unit = re.match(r"\\s*(%|배|년|개|위)", after)
+        unit = re.match(r"\s*(%|배|년|개|위)", after)
         if not unit:
             return native, ["OCR 후보 분리 보존"]
         observed = re.findall(
-            r"(?<!\\d)(\\d{1,3})\\s*" + re.escape(unit.group(1)), candidate)
-    values = {re.sub(r"\\s+", "", x) for x in observed}
+            r"(?<!\d)(\d{1,3})\s*" + re.escape(unit.group(1)), candidate)
+    values = {re.sub(r"\s+", "", x) for x in observed}
     if len(values) != 1:
         return native, ["OCR 후보 분리 보존"]
     value = next(iter(values))
