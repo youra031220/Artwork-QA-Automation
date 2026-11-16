@@ -50,8 +50,8 @@ def _read_korean_print(page, rect, dpi=350):
         for psm in (6,3):
             try:
                 result=pytesseract.image_to_string(
-                    img,lang="kor+eng",config=f"--oem 3 --psm {psm}")
-            except pytesseract.TesseractError:
+                    img,lang="kor+eng",config=f"--oem 3 --psm {psm}",timeout=6)
+            except (pytesseract.TesseractError, RuntimeError):
                 continue
             norm=" ".join(result.split())
             evidence.append(norm)
