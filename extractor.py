@@ -133,7 +133,10 @@ def ocr_crop_rect(page, line, chars, numeric_context=False):
     baseline = line["spans"][0]["origin"][1]
     upside_down = line.get("dir", (1, 0))[0] < -0.8
     if upside_down:
-        y0, y1 = baseline - size * .38, baseline + size * 1.30
+        # Rotated 180°: the glyphs sit ABOVE the baseline in page space. A
+        # taller window pulls in half of the neighbouring line and makes
+        # Tesseract misread short words (e.g. 테팔 -> "AIS").
+        y0, y1 = baseline - size * .25, baseline + size * 1.05
     else:
         # PDF glyphs can extend beyond font metrics; tight vertical clipping
         # truncates the second half of multiword Korean OCR candidates.
@@ -187,12 +190,17 @@ def render_ocr_crop(page, rect, dpi, upside_down=False, text_rgb=None):
 OCR_TIMEOUT = 30
 
 
-def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None, psm=7):
+def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None, psm=7, scale=1.0):
     """Individual OCR of one damaged line (fallback path)."""
     rect, upside_down = ocr_crop_rect(page, line, chars, numeric_context)
     if rect.is_empty:
         return ""
     image = render_ocr_crop(page, rect, dpi, upside_down, line_text_rgb(line))
+    if scale != 1.0:
+        # Same 350 DPI render, enlarged: an independent second look at small
+        # thin glyphs (no lower-resolution reading is ever used).
+        image = image.resize((int(image.width * scale), int(image.height * scale)),
+                             Image.LANCZOS)
     # Border is critical: Tesseract rejects tightly cropped short lines.
     image = ImageOps.expand(image, border=25, fill=255)
 
@@ -704,13 +712,22 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
             # crop independent of its neighbours in the sheet.
             vector_ids = [i for i, r in enumerate(regions) if r["kind"] == "vector"]
             image_ids = [i for i, r in enumerate(regions) if r["kind"] == "image"]
+            # Badge text lines. Small badges carry no reliable orientation
+            # cue (a badge on a folded flap is printed upside down), so each
+            # badge is read upright AND turned 180°, and the reading with more
+            # confidently recognised Korean wins. Lines are normalised to one
+            # height so the single-line strip has a stable baseline.
             band_owner, band_images = [], []
             for i in image_ids:
-                for (top, bottom), band in split_text_bands(region_images[i]):
-                    if band.height > 200:      # picture, not a text line
-                        continue
-                    band_owner.append((i, top))
-                    band_images.append(band)
+                for turn in (0, 180):
+                    image = region_images[i] if turn == 0 else region_images[i].rotate(180)
+                    for (top, bottom), band in split_text_bands(image):
+                        if band.height > 200:      # picture, not a text line
+                            continue
+                        band = band.resize((max(1, int(band.width * 64 / band.height)), 64),
+                                           Image.LANCZOS)
+                        band_owner.append((i, turn))
+                        band_images.append(band)
             # Process plan (each call = one Tesseract process, 350 DPI crops).
             # Streamlit Cloud cost scales with OCR'd PIXELS, so sheets carry
             # no blank padding:
@@ -748,10 +765,16 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
             line_results = first[:len(images)]
             region_results = [[] for _ in regions]
             offset = len(images)
-            for (i, top), lines in zip(band_owner, first[offset:]):
-                for line in lines:
-                    x0, y0, x1, y1 = line["bbox"]
-                    region_results[i].append(dict(line, bbox=(x0, y0 + top, x1, y1 + top)))
+            readings = {}
+            for (i, turn), lines in zip(band_owner, first[offset:]):
+                readings.setdefault((i, turn), []).extend(lines)
+
+            def korean_score(lines):
+                return sum(len(KOR.findall(l["text"])) for l in lines if l["conf"] >= 60)
+
+            for i in image_ids:
+                upright, turned = readings.get((i, 0), []), readings.get((i, 180), [])
+                region_results[i] = turned if korean_score(turned) > korean_score(upright) else upright
             for i in large_vector:
                 region_results[i] = run_batch([region_images[i]], 4, "table_reread",
                                               "한국어 표 영역")[0]
@@ -805,10 +828,12 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                             candidates.append(reading)
                             readings.append(fill_damaged_glyphs(native, reading)[0])
                     if "\ufffd" in merge_hole_readings(native, readings):
-                        # Tie-break with a third independent mode (raw line).
+                        # Tie-break: the tight crop enlarged 1.5x. (The wide
+                        # crop can take in neighbouring artwork, e.g. a photo,
+                        # and misread a digit: 5 -> 9.)
                         reading = tight_ocr(page, target["line"], target["chars"], dpi,
                                             numeric_context=False, stats=stats["fallback"],
-                                            psm=13)
+                                            scale=1.5)
                         if reading:
                             candidates.append(reading)
                             readings.append(fill_damaged_glyphs(native, reading)[0])
