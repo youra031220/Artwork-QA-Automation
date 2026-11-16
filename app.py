@@ -170,76 +170,10 @@ if st.session_state.get("qa_result"):
         st.dataframe(pd.DataFrame(basic_info), use_container_width=True, hide_index=True)
         st.caption("제품명은 PDF에서 읽은 레인지명·제품유형·크기로 표시합니다. 추출 성공은 최종 검수 승인을 뜻하지 않습니다.")
 
-    if identity_checks:
-        st.subheader("포장 제품명 일치 여부")
-        checks_df = pd.DataFrame(identity_checks)
-        overall = (
-            checks_df[checks_df["is_primary"]].groupby("file")["status"].apply(
-                lambda statuses: "FAIL" if "FAIL" in statuses.values
-                else ("OK" if all(status == "OK" for status in statuses) else "REVIEW")
-            ).reset_index(name="종합 판정")
-        )
-        a, b, c = st.columns(3)
-        a.metric("OK 제품", int((overall["종합 판정"] == "OK").sum()))
-        b.metric("REVIEW 제품", int((overall["종합 판정"] == "REVIEW").sum()))
-        c.metric("FAIL 제품", int((overall["종합 판정"] == "FAIL").sum()))
-        st.dataframe(pd.DataFrame(shown_records(overall.to_dict("records"))), use_container_width=True, hide_index=True)
-        identity_view = shown_records(
-            checks_df[["file", "page", "check", "comparison_reference", "extracted",
-                       "status", "note"]].to_dict("records")
-        )
-        st.dataframe(
-            pd.DataFrame(identity_view).rename(columns={
-                "page": "페이지", "check": "확인 항목",
-                "comparison_reference": "비교 기준", "extracted": "PDF 실제 문구",
-                "status": "판정", "note": "검토 사유",
-            }),
-            use_container_width=True, hide_index=True,
-        )
-        st.caption("포장에 인쇄된 제품명과 PDF 작업정보의 레인지명이 일치하는지 확인합니다. 원본 파일명은 판정에 사용하지 않습니다.")
-        with st.expander("PDF 추출 위치 미리보기 · 근거 확인"):
-            available = checks_df[checks_df["x0"].notna()]
-            if available.empty:
-                st.info("좌표가 확인된 문구가 없습니다.")
-            else:
-                file_options = available["file"].drop_duplicates().tolist()
-                selected_file = st.selectbox("제품 선택", file_options, format_func=shown_file, key="identity_file")
-                source_rows = available[available["file"] == selected_file]
-                labels = [
-                    f"{r['check']} · p.{int(r['page'])} · {r['extracted']}"
-                    for _, r in source_rows.iterrows()
-                ]
-                selected_index = st.selectbox(
-                    "확인할 위치", range(len(labels)),
-                    format_func=lambda i: labels[i], key="identity_position"
-                )
-                selected = source_rows.iloc[selected_index]
-                uploaded = next((item for item in files if item.name == selected_file), None)
-                if uploaded:
-                    with fitz.open(stream=uploaded.getvalue(), filetype="pdf") as evidence_pdf:
-                        evidence_page = evidence_pdf[int(selected["page"]) - 1]
-                        target = fitz.Rect(
-                            float(selected["x0"]), float(selected["y0"]),
-                            float(selected["x1"]), float(selected["y1"])
-                        )
-                        margin_x = max(25, target.width * 1.0)
-                        margin_y = max(18, target.height * 2.0)
-                        crop = fitz.Rect(
-                            target.x0 - margin_x, target.y0 - margin_y,
-                            target.x1 + margin_x, target.y1 + margin_y
-                        ) & evidence_page.rect
-                        if not crop.is_empty:
-                            pixmap = evidence_page.get_pixmap(
-                                clip=crop, matrix=fitz.Matrix(2, 2), alpha=False
-                            )
-                            st.image(pixmap.tobytes("png"), caption=(
-                                f"{selected['location']} · PDF {int(selected['page'])}페이지"
-                                f" · x={selected['x0']}, y={selected['y0']}"
-                            ))
-                            st.write("추출 문구:", selected["extracted"])
-                            if selected["context"]:
-                                st.write("주변 문구:", selected["context"])
-        
+    # 포장 제품명 일치 여부(OK/REVIEW/FAIL) 화면은 제거. 근거 데이터는 ZIP과
+    # PDF 위치 확인 화면(제품명 박스)에서만 사용한다.
+    checks_df = pd.DataFrame(identity_checks) if identity_checks else None
+
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
