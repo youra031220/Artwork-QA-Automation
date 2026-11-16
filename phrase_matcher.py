@@ -63,6 +63,8 @@ def _one(row, master):
                 numeric_review=bool(row.get("numeric_review")),
                 original_extracted=row.get("original_paragraph", actual),
                 ocr_reconstructed=bool(row.get("ocr_reconstructed")),
+                region_ocr=bool(row.get("region_ocr")),
+                text_source=row.get("text_source", "native_pdf"),
                 phrase_id="", rule_id="", category="미분류", reference_korean="",
                 reference_english="", source_row=None, approval_status="",
                 differences="", reason="", candidates=[])
@@ -76,11 +78,22 @@ def _one(row, master):
         return compact(value).rstrip(".。")
     norm = [(p,v) for p,v in refs if orthographic(actual) == orthographic(p["korean_original"])]
     matches = exact or norm
+    alternates = []
     if matches:
         if len({p["phrase_id"] for p,v in matches}) > 1:
-            return dict(base, status="AMBIGUOUS_MATCH", candidates=[
-                p["phrase_id"] for p,v in matches],
-                reason="복수의 정답 행에 동일 문구가 존재")
+            # Rows with the SAME Korean text, category and rule are one
+            # Korean answer registered twice (e.g. English singular/plural
+            # variants). That is not an ambiguity for the Korean check.
+            # Rows that differ in category or rule stay ambiguous.
+            keys = {(compact(p["korean_original"]), p["category_id"], v.get("rule_id", ""))
+                    for p,v in matches}
+            if len(keys) > 1:
+                return dict(base, status="AMBIGUOUS_MATCH", candidates=[
+                    p["phrase_id"] for p,v in matches],
+                    reason="복수의 정답 행에 동일 문구가 존재")
+            alternates = [{"phrase_id": p["phrase_id"],
+                           "reference_english": p.get("english_original", ""),
+                           "source_row": p.get("source_row")} for p,v in matches]
         p,v = matches[0]
         status = ("OCR_REVIEW" if row.get("numeric_review") or DAMAGE.search(actual)
                   else "EXACT_MATCH" if exact else "NORMALIZED_MATCH")
@@ -90,6 +103,10 @@ def _one(row, master):
                     reference_english=p.get("english_original",""),
                     approval_status=p.get("approval_status","UNVERIFIED"),
                     source_row=p.get("source_row"),
+                    candidates=[a["phrase_id"] for a in alternates],
+                    alternates=alternates,
+                    differences=("원장 동일 국문 중복 등록: " + ", ".join(
+                        a["phrase_id"] for a in alternates)) if alternates else "",
                     reason=("원문 손상·숫자 대조 필요" if status=="OCR_REVIEW"
                             else "기준 문구와 일치 (최종 승인 의미 아님)"))
     # Permit a reference substring inside a longer physically grouped line.
@@ -188,15 +205,37 @@ def _one(row, master):
         status="TEXT_MISMATCH"
     if len(others)>1:
         status="AMBIGUOUS_MATCH"
+    actual_numbers, expected_numbers = tokens(actual), tokens(p["korean_original"])
+    added_only = (mismatch and not DAMAGE.search(actual)
+                  and set(expected_numbers) <= set(actual_numbers))
+    numeric_value = re.compile(r"\d{1,4}\s*/\s*\d{1,4}|\d+(?:[.,]\d+)?\s*(?:%|년|배|개|위|cm|mm)?")
+    expected_compact = compact(p["korean_original"])
+    added = sorted({re.sub(r"\s+", "", m.group()) for m in numeric_value.finditer(actual)
+                    if re.sub(r"\s+", "", m.group()).casefold() not in expected_compact})
+    if row.get("numeric_review") or DAMAGE.search(actual):
+        differences = "OCR 글자 손상 · 원본 확인"
+        reason = "가장 유사한 정답 후보. 자동 승인/발견 집계 제외"
+    elif added_only:
+        # e.g. PDF '18/10 스테인리스 스틸 - 10년 품질보증' vs ledger
+        # '스테인리스 스틸 10년 품질보증': every ledger number is printed and
+        # the PDF ADDS a value. This is not a wrong number.
+        differences = "원장에 없는 수치 추가: " + ", ".join(added)
+        reason = ("원장 수치는 모두 일치 · PDF에 원장 미등록 수치(" + ", ".join(added)
+                  + ") 추가 인쇄 · 원장 등록 여부 확인 필요")
+    elif mismatch:
+        differences = "숫자·단위 불일치"
+        reason = "원장과 다른 수치 · 인쇄 수치 확인 필요"
+    else:
+        differences = "문자·의미 검토 필요"
+        reason = "가장 유사한 정답 후보. 자동 승인/발견 집계 제외"
     return dict(base,status=status,phrase_id=p["phrase_id"],
                 rule_id=v.get("rule_id",""),category=p["category_id"],
                 source_row=p.get("source_row"),
                 reference_korean=p["korean_original"],
                 reference_english=p.get("english_original",""),
                 approval_status=p.get("approval_status","UNVERIFIED"),
-                differences=("OCR 글자 손상 · 원본 확인" if row.get("numeric_review") or DAMAGE.search(actual)
-                             else "숫자·단위 불일치" if mismatch else "문자·의미 검토 필요"),
-                reason="가장 유사한 정답 후보. 자동 승인/발견 집계 제외",
+                differences=differences,
+                reason=reason,
                 candidates=others)
 
 

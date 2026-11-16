@@ -131,6 +131,19 @@ def _should_join_across_blocks(previous, current):
     # remains a separate group.
     if re.search(r"세계판매\s*1위$", a) and b.startswith("주방용품"):
         return True
+    # World No.1 claim and its Euromonitor source are ONE printed footnote.
+    # In multilingual legal blocks the Korean claim starts mid-line (after
+    # another language) and the source continues at the left margin of the
+    # NEXT line of the SAME text block, so x0 differs widely. Require the
+    # same block, consecutive lines, same size and a one-line baseline step.
+    if (re.search(r"세계\s*판매\s*(?:\d|\ufffd)+\s*위\s*주방용품\.?$", a)
+            and re.match(r"^Euromonitor\b", b)
+            and previous.get("block_id") == current.get("block_id")
+            and previous.get("line_id", -10) + 1 == current.get("line_id", -1)):
+        size = max(float(previous.get("font_size", 0)), float(current.get("font_size", 0)), 1)
+        step = float(current.get("baseline_y", 0)) - float(previous.get("baseline_y", 0))
+        if 0 < step <= size * 2.2:
+            return True
     return False
 
 
@@ -259,10 +272,17 @@ def group_paragraphs(rows, raw_summaries=None):
              "bbox": [row["x0"], row["y0"], row["x1"], row["y1"]]}
             for index, row in group
         ]
+        originals = [str(row.get("pdf_original") or row["korean_text"]).strip()
+                     for _, row in group]
         output.append({
             "file": group[0][1]["file"],
             "page": group[0][1]["page"],
             "paragraph": text,
+            # Native PDF text before any OCR hole filling (U+FFFD kept).
+            "original_paragraph": " ".join(o for o in originals if o) or text,
+            "ocr_reconstructed": any(row.get("ocr_reconstructed") for _, row in group),
+            "region_ocr": any(row.get("region_ocr") for _, row in group),
+            "text_source": group[0][1].get("text_source", "native_pdf"),
             "type": kind,
             "line_count": len(group),
             "line_indices": [index for index, _ in group],
@@ -337,6 +357,7 @@ def _rebuild_storage_claim(groups, raw_summaries):
         # The new reading order reflects the printed claim, not PDF object order.
         new = dict(group)
         new["paragraph"] = "최대 " + number["text"].strip() + " 수납 공간 절약"
+        new["original_paragraph"] = new["paragraph"]
         new["type"] = "공간 배치 문구 연결"
         new["status"] = "PDF 원본 3개 객체 연결 · 확인 권장"
         new["numeric_review"] = False
@@ -382,6 +403,10 @@ def ensure_group_coverage(groups, rows):
         output.append({
             "file": row["file"], "page": row["page"],
             "paragraph": row["korean_text"], "type": "원본 문구",
+            "original_paragraph": row.get("pdf_original") or row["korean_text"],
+            "ocr_reconstructed": bool(row.get("ocr_reconstructed")),
+            "region_ocr": bool(row.get("region_ocr")),
+            "text_source": row.get("text_source", "native_pdf"),
             "line_count": 1, "line_indices": [index],
             "status": row.get("status", "원본 확인 필요"),
             "warnings": list(row.get("warnings", [])),
@@ -438,6 +463,11 @@ def join_wrapped_storage_sentences(groups):
                 continue
             merged = copy.deepcopy(first)
             merged["paragraph"] = a.rstrip() + " " + b.lstrip()
+            merged["original_paragraph"] = (
+                str(first.get("original_paragraph") or a).rstrip() + " "
+                + str(second.get("original_paragraph") or b).lstrip())
+            merged["ocr_reconstructed"] = bool(first.get("ocr_reconstructed")
+                                               or second.get("ocr_reconstructed"))
             for key in ("line_indices", "source_coordinates", "raw_evidence_ids", "ocr_candidates", "numeric_peer_evidence"):
                 merged[key] = list(first.get(key) or []) + list(second.get(key) or [])
             merged["line_count"] = len(merged["line_indices"])

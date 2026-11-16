@@ -28,55 +28,21 @@ import hashlib
 import re
 from difflib import SequenceMatcher
 
-BAD = re.compile(r"[\ufffd□]")
-HANGUL = re.compile(r"[가-힣]")
-NUMERIC_HOLE = re.compile(r"[\ufffd□]{1,5}\s*(?:%|/\s*[\ufffd□]|배|개|년|위)")
-NUMBERS = re.compile(r"\d+(?:\s*/\s*\d+)?\s*(?:%|배|개|년|위)")
+HOLE = "\ufffd"
 
 
-def prepare_ocr_groups(groups):
-    output = []
-    for group in groups:
-        item = dict(group)
-        original = str(item.get("paragraph", ""))
-        if not BAD.search(original):
-            output.append(item)
-            continue
-        anchor = "".join(HANGUL.findall(original))
-        candidates = []
-        for entry in item.get("ocr_candidates") or []:
-            value = str(entry.get("text", "") if isinstance(entry, dict) else entry).strip()
-            if BAD.search(value) or not value:
-                continue
-            observed = "".join(HANGUL.findall(value))
-            if len(anchor) < 5 or len(observed) < len(anchor) * .85:
-                continue
-            if SequenceMatcher(None, anchor, observed).ratio() < .93:
-                continue
-            if NUMERIC_HOLE.search(original):
-                # Numeric OCR cannot be treated as verified when several
-                # numbers or units are missing or the reading is ambiguous.
-                if not NUMBERS.search(value):
-                    continue
-            candidates.append(value)
-        unique = {re.sub(r"\s+", "", c) for c in candidates}
-        if len(unique) != 1:
-            output.append(item)
-            continue
-        candidate = candidates[0]
-        # A clean OCR transcription with the same readable Korean content
-        # can resolve corrupted whitespace, but never auto-approve an
-        # independently damaged numeric assertion.
-        numeric_damaged = bool(NUMERIC_HOLE.search(original))
-        item["original_paragraph"] = item.get("original_paragraph", original)
-        item["paragraph"] = candidate
-        item["ocr_reconstructed"] = True
-        item["ocr_pre_match"] = True
-        if not numeric_damaged and not item.get("numeric_review"):
-            item["numeric_review"] = False
-            item["status"] = "OCR 글자 재검증 · 기준 대조 가능"
-        output.append(item)
-    return output
+def display_phrase(match):
+    """Best printed text for the QA table. NEVER a status placeholder.
+
+    Order: the reconstructed extracted text (OCR filled only verified glyph
+    holes), then the native original. Remaining unreadable glyphs are shown
+    as '□' at their exact position so the reviewer sees the real sentence.
+    """
+    for key in ("extracted", "original_extracted"):
+        value = str(match.get(key) or "").strip()
+        if value:
+            return value.replace(HOLE, "□")
+    return ""
 
 
 st.set_page_config(page_title="아트웍 문구 검수", layout="wide")
@@ -94,8 +60,18 @@ except Exception as exc:
 
 OCR_DPI = 350  # 실무자 화면에서는 숨기는 검증된 기본 OCR 해상도
 @st.cache_data(show_spinner=False, max_entries=12)
+def _cached_extract_content(pdf_bytes, dpi):
+    # Keyed on PDF CONTENT only: the same artwork uploaded under another
+    # file name is not OCR'd again.
+    return extract_pdf(pdf_bytes, "__pdf__", dpi=dpi)
+
+
 def cached_extract_pdf(pdf_bytes, filename, dpi):
-    return extract_pdf(pdf_bytes, filename, dpi=dpi)
+    import copy
+    rows, info = copy.deepcopy(_cached_extract_content(pdf_bytes, dpi))
+    for item in rows + info:
+        item["file"] = filename
+    return rows, info
 
 signature = tuple((f.name, hashlib.sha256(f.getvalue()).hexdigest()) for f in (files or []))
 if st.session_state.get("qa_signature") != signature:
@@ -147,6 +123,38 @@ if st.session_state.get("qa_result"):
         return display_file_table(records, reviewer_labels)
     if errors:
         st.error("\n".join(errors))
+    for page_info in summaries:
+        for warning in page_info.get("ocr_warnings") or []:
+            st.warning(f"{shown_file(page_info['file'])} p.{page_info['page']} · {warning}")
+    with st.expander("처리 시간 · OCR 호출 기록", expanded=False):
+        timing_rows = []
+        for page_info in summaries:
+            stats = page_info.get("ocr_stats") or {}
+            batch = stats.get("batch") or {}
+            image_batch = stats.get("table_reread") or {}
+            fallback = stats.get("fallback") or {}
+            badge = stats.get("badge") or {}
+            line_reread = stats.get("line_reread") or {}
+            timing_rows.append({
+                "제품": shown_file(page_info["file"]), "페이지": page_info["page"],
+                "손상 문구 줄": stats.get("damaged_lines", 0),
+                "이미지·벡터 후보 영역": stats.get("regions", 0),
+                "이미지·벡터에서 찾은 한국어 행": stats.get("region_rows", 0),
+                "OCR 프로세스 호출": (batch.get("calls", 0) + image_batch.get("calls", 0)
+                                    + badge.get("calls", 0) + line_reread.get("calls", 0)
+                                    + fallback.get("calls", 0)),
+                "일괄 OCR(손상 문구+이미지·벡터) 초": batch.get("seconds", 0),
+                "한국어 표 영역 단독 재판독 초": image_batch.get("seconds", 0),
+                "이미지 배지 OCR 초": badge.get("seconds", 0),
+                "표 행 재판독 초": line_reread.get("seconds", 0),
+                "개별 재판독 호출": fallback.get("calls", 0),
+                "개별 재판독 초": fallback.get("seconds", 0),
+                "렌더링 초": stats.get("render_seconds", 0),
+                "PDF 추출 전체 초": stats.get("total_seconds", 0),
+            })
+        if timing_rows:
+            st.dataframe(pd.DataFrame(timing_rows), use_container_width=True, hide_index=True)
+        st.caption("OCR 해상도 350 DPI. 같은 PDF 내용을 다시 검수하면 저장된 추출 결과를 재사용합니다.")
     if product_metadata:
         st.subheader("제품 기본정보")
         basic_info = [{
@@ -249,7 +257,11 @@ if st.session_state.get("qa_result"):
             # Reconcile OCR before matching, not only while rendering the table.
             # Keep original PDF evidence and mark only genuinely corroborated
             # readings as eligible for an exact reference comparison.
-            matched_groups = join_wrapped_storage_sentences(prepare_ocr_groups(grouped))
+            # OCR is applied per physical line inside extract_pdf (only the
+            # unreadable glyph holes are filled, native letters are kept),
+            # then lines are joined into sentences. No whole-sentence OCR
+            # substitution happens here.
+            matched_groups = join_wrapped_storage_sentences(grouped)
             p1_matches = match_phrases(matched_groups, p1_master)
             all_files = sorted({g["file"] for g in grouped} | {m["file"] for m in product_metadata})
             p1_rules = [
@@ -375,50 +387,46 @@ if st.session_state.get("qa_result"):
                                      f"{finding.get('finding', '')}")
 
             from extractor import numeric_tokens
-            # Only clean numeric readings enter the main results table.
-            # OCR candidates are already generated from the same printed
-            # region by extractor.tight_ocr. Never substitute reference
-            # text or other-language numbers for damaged Korean source.
-            from numeric_display import clean_numeric_reading
             excluded_by_file = {filename: [] for filename in all_files}
             shown_by_file = {filename: [] for filename in all_files}
             for match in p1_matches:
-                phrase, numeric_problem = clean_numeric_reading(match)
-                # The numeric-only gate does not catch corrupted spaces and
-                # other nonnumeric Unicode replacement glyphs.
-                if not numeric_problem and ("\ufffd" in phrase or "□" in phrase):
-                    ocr_reading = readable_ocr_review(match)
-                    if ocr_reading and not any(c in ocr_reading for c in ("\ufffd", "□")):
-                        phrase = ocr_reading
-                    else:
-                        numeric_problem = "OCR 글자 판독 불확실 · 원본 PDF 확인 필요"
-                if numeric_problem:
-                    # Never silently drop a printed Korean phrase from QA.
-                    # Keep the original evidence visible, but do not approve it.
-                    excluded_by_file[match["file"]].append(numeric_problem)
-                    phrase = str(match.get("paragraph") or phrase)
-                    if not phrase.strip():
-                        phrase = "[PDF 추출 불확실 · 원본 위치 확인 필요]"
+                phrase = display_phrase(match)
+                english = find_english_counterpart(match, summaries)
+                # Same Korean registered twice (English variants): show the
+                # ledger English that the PDF actually prints.
+                for alternate in match.get("alternates") or []:
+                    trial = find_english_counterpart(
+                        dict(match, reference_english=alternate["reference_english"]), summaries)
+                    if trial and len(trial) > len(english or ""):
+                        english = trial
+                        match["reference_english"] = alternate["reference_english"]
+                        match["phrase_id"] = alternate["phrase_id"]
+                unreadable = "□" in phrase
                 has_number = bool(numeric_tokens(phrase) or match.get("numeric_review"))
                 is_uncertain = match["status"] in ("OCR_REVIEW", "NUMERIC_MISMATCH",
                     "TEXT_MISMATCH", "AMBIGUOUS_MATCH", "UNREGISTERED")
-                # Do not erase the QA risk even if the re-read phrase looks clean.
                 issue = ""
-                if numeric_problem:
-                    issue = "PDF 원문 판독 불확실 · " + str(numeric_problem)
+                if match.get("region_ocr"):
+                    issue = "텍스트 레이어 없음 · 이미지/벡터 영역 OCR 판독 · 원본 PDF 확인 필요"
+                elif unreadable:
+                    issue = ("OCR 숫자 판독 불확실 · 원본 PDF 확인 필요"
+                             if re.search(r"□+\s*(?:%|개|배|년|위|/)", phrase)
+                             else "OCR 글자 판독 불확실(□) · 원본 PDF 확인 필요")
+                    excluded_by_file[match["file"]].append(phrase)
                 elif match["status"] == "OCR_REVIEW":
-                    issue = "원본 글자·숫자 확인 필요"
+                    issue = "OCR로 복원한 글자·숫자 포함 · 원본 확인 필요"
                 elif is_uncertain:
                     issue = match.get("reason") or "기준 문구 확인 필요"
                 if match.get("ocr_reconstructed") and not issue:
-                    issue = "원본 문구 확인 필요"
+                    issue = "OCR로 복원한 공백·글자 포함 · 원본 문구 확인 필요"
+                needs_review = bool(is_uncertain or unreadable or match.get("region_ocr"))
                 verdict, reviewer_issue = render_policy_status(
                     match, p1_rules,
-                    "확인 필요" if (is_uncertain or numeric_problem) else reviewer_status(match["status"]),
+                    "확인 필요" if needs_review else reviewer_status(match["status"]),
                     issue)
                 shown_by_file[match["file"]].append({
                     "국문 추출 문구": phrase,
-                    "영문 추출 문구": find_english_counterpart(match, summaries),
+                    "영문 추출 문구": english,
                     "문구 카테고리": match.get("category") or "미분류",
                     "문구 유형": "수치 포함" if has_number else "일반 문구",
                     "대조 결과": verdict,
@@ -433,16 +441,16 @@ if st.session_state.get("qa_result"):
                     st.markdown(reviewer_html_table(product_rows), unsafe_allow_html=True)
                     needing_review = sum(bool(row["확인할 사항"]) for row in product_rows)
                     st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
-                if excluded_by_file[filename]:
-                    st.warning(
-                        f"글자·숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구를 "
-                        "검수표에 확인 필요로 표시했습니다. PDF 원본 확인이 필요합니다."
-                    )
-                    with st.expander("글자·숫자 재검증 실패 항목 · 원본 확인 필요"):
-                        for issue in excluded_by_file[filename]:
-                            st.write(issue)
                 else:
                     st.info("이 제품에서 추출된 문구가 없습니다.")
+                if excluded_by_file[filename]:
+                    st.warning(
+                        f"판독할 수 없는 글자(□)가 남은 문구 {len(excluded_by_file[filename])}개를 "
+                        "원문 그대로 검수표에 확인 필요로 표시했습니다. PDF 원본 확인이 필요합니다."
+                    )
+                    with st.expander("판독 불확실 글자(□) 포함 문구 · 원본 확인 필요"):
+                        for issue in excluded_by_file[filename]:
+                            st.write(issue)
             st.download_button("문구 검수 보고서 ZIP 다운로드",
                 export_p1(p1_matches, p1_rules, p1_summary),
                 "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")

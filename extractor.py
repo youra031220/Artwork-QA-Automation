@@ -14,6 +14,10 @@ import fitz
 from PIL import Image, ImageOps
 import pytesseract
 
+from ocr_batch import batch_ocr, strip_ocr
+from region_text import (find_untexted_regions, render_region, crop_box_to_pdf,
+                         direction_for, split_text_bands)
+
 KOR = re.compile("[가-힣]")
 FOREIGN = re.compile(r"[A-Za-zÀ-ÿА-Яа-я]{3,}")
 # Other scripts in multilingual packaging are not Korean review copy.
@@ -88,65 +92,21 @@ def korean_segment(line):
     return chars[start:end], re.sub(r"\s+", " ", text[start:end]).strip()
 
 
-def tight_ocr(page, line, chars, dpi, numeric_context=False):
-    direction = line.get("dir", (1, 0))
-    boxes = [c["bbox"] for c in chars]
-    x0 = min(b[0] for b in boxes) - (min(95, line["spans"][0]["size"] * 12) if numeric_context else 2)
-    x1 = max(b[2] for b in boxes) + (max(12, line["spans"][0]["size"] * 2) if numeric_context else 4)
-    first_span = line["spans"][0]
-    baseline = first_span["origin"][1]
-    size = first_span["size"]
-    upside_down = direction[0] < -0.8
-    if upside_down:
-        y0, y1 = baseline - size * .38, baseline + size * 1.30
-    else:
-        # PDF glyphs can extend beyond font metrics; tight vertical clipping
-        # truncates the second half of multiword Korean OCR candidates.
-        factor_top, factor_bottom = (1.30, .40) if numeric_context else (1.15, .30)
-        y0, y1 = baseline - size * factor_top, baseline + size * factor_bottom
-    rect = fitz.Rect(x0, y0, x1, y1) & page.rect
-    if rect.is_empty:
-        return ""
-    pix = page.get_pixmap(
-        clip=rect,
-        matrix=fitz.Matrix(dpi / 72, dpi / 72),
-        alpha=False,
-    )
-    image = Image.open(io.BytesIO(pix.tobytes("png")))
-    if upside_down:
-        image = image.rotate(180, expand=True)
-    image = ImageOps.autocontrast(ImageOps.grayscale(image))
-    # Border is critical: Tesseract rejects tightly cropped short lines.
-    image = ImageOps.expand(image, border=25, fill=255)
-    try:
-        result = pytesseract.image_to_string(
-            image, lang="kor+eng", config="--oem 3 --psm 7", timeout=6
-        ).strip()
-    except pytesseract.TesseractNotFoundError as exc:
-        raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
-    except RuntimeError:
-        return ""  # OCR timeout: retain PDF evidence and continue QA.
-    except pytesseract.TesseractError as exc:
-        raise RuntimeError("Tesseract 한국어 언어팩 설치를 확인하세요.") from exc
-    # A narrow one-line OCR pass can stop after the first Korean word.
-    # Retry as a single text block only for demonstrably truncated outputs.
-    korean_length = sum(bool(KOR.search(c["c"])) for c in chars)
-    result_korean_length = len(KOR.findall(result))
-    if (korean_length >= 10 and result_korean_length < korean_length * .60):
-        try:
-            alternative = pytesseract.image_to_string(
-                image, lang="kor+eng", config="--oem 3 --psm 6", timeout=6
-            ).strip()
-            if len(KOR.findall(alternative)) > result_korean_length * 1.35:
-                result = alternative
-        except (pytesseract.TesseractError, RuntimeError):
-            pass  # Preserve the original OCR candidate as evidence.
-    result = re.sub(r"\s+", " ", result)
+def _ocr_korean_span(result):
+    """Korean reading range of an OCR string.
+
+    The crop already covers only the Korean glyph boxes of the native PDF
+    line, so the range is first Hangul (with a numeric / QR / AI lead) to the
+    LAST Hangul, plus its directly attached closing punctuation. Latin
+    garbage that OCR produces *inside* a Korean sentence (e.g. 'SEA' for a
+    misread word) must not truncate the rest of the sentence; it is kept as
+    evidence and the native text stays authoritative.
+    """
+    result = re.sub(r"\s+", " ", result or "").strip()
     match = KOR.search(result)
     if not match:
         return ""
     start = match.start()
-    # A corrupted PDF digit such as '�배' can be restored as '4배'.
     number = re.search(r"\d\s*$", result[:start])
     if number:
         start = number.start()
@@ -159,9 +119,190 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
     prefix = re.search(r"(?:QR|AI)\s*$", result[max(0, start - 3):start])
     if prefix:
         start -= len(prefix.group())
-    end = _korean_scope_end(result, match.start())
+    last = max(m.end() for m in KOR.finditer(result))
+    tail = re.match(r"[.)\]）」』%]*", result[last:])
+    end = last + (tail.end() if tail else 0)
     return result[start:end].strip(" /|•")
 
+
+def ocr_crop_rect(page, line, chars, numeric_context=False):
+    boxes = [c["bbox"] for c in chars]
+    size = line["spans"][0]["size"]
+    x0 = min(b[0] for b in boxes) - (min(95, size * 12) if numeric_context else 2)
+    x1 = max(b[2] for b in boxes) + (max(12, size * 2) if numeric_context else 4)
+    baseline = line["spans"][0]["origin"][1]
+    upside_down = line.get("dir", (1, 0))[0] < -0.8
+    if upside_down:
+        y0, y1 = baseline - size * .38, baseline + size * 1.30
+    else:
+        # PDF glyphs can extend beyond font metrics; tight vertical clipping
+        # truncates the second half of multiword Korean OCR candidates.
+        factor_top, factor_bottom = (1.30, .40) if numeric_context else (1.15, .30)
+        y0, y1 = baseline - size * factor_top, baseline + size * factor_bottom
+    return fitz.Rect(x0, y0, x1, y1) & page.rect, upside_down
+
+
+def line_text_rgb(line):
+    """Printed colour of the Korean glyphs of a native PDF line."""
+    for span in line.get("spans", []):
+        if any(KOR.search(c["c"]) for c in span.get("chars", [])):
+            colour = int(span.get("color", 0))
+            return ((colour >> 16) & 255, (colour >> 8) & 255, colour & 255)
+    return None
+
+
+def render_ocr_crop(page, rect, dpi, upside_down=False, text_rgb=None):
+    """Render one crop at the OCR DPI as a dark-text-on-white image.
+
+    With the native glyph colour known, every pixel is mapped by its colour
+    distance to that text colour: the printed letters become black and all
+    other inks (dielines crossing a word, coloured panels, neighbouring
+    artwork) fade to white. This keeps a cyan cutting line through '인덕션'
+    from hiding the word.
+    """
+    import numpy as np
+    from region_text import page_pixmap
+    pix = page_pixmap(page, rect, dpi)
+    if text_rgb is not None and pix.n >= 3:
+        pixels = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+            pix.height, pix.width, pix.n)[:, :, :3].astype(float)
+        text = np.array(text_rgb, dtype=float)
+        sample = (pixels[::3, ::3].reshape(-1, 3).astype(int) // 16)
+        packed = sample[:, 0] * 256 + sample[:, 1] * 16 + sample[:, 2]
+        mode = int(np.bincount(packed, minlength=4096).argmax())
+        background = np.array([mode // 256, (mode // 16) % 16, mode % 16]) * 16 + 8
+        reference = max(np.sqrt(((background - text) ** 2).sum()), 60.0)
+        distance = np.sqrt(((pixels - text) ** 2).sum(axis=2))
+        image = Image.fromarray(np.clip(distance / reference * 255, 0, 255).astype("uint8"))
+    else:
+        image = ImageOps.autocontrast(ImageOps.grayscale(
+            Image.open(io.BytesIO(pix.tobytes("png")))))
+    if upside_down:
+        image = image.rotate(180, expand=True)
+    return image
+
+
+def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None):
+    """Individual OCR of one damaged line (fallback path)."""
+    rect, upside_down = ocr_crop_rect(page, line, chars, numeric_context)
+    if rect.is_empty:
+        return ""
+    image = render_ocr_crop(page, rect, dpi, upside_down, line_text_rgb(line))
+    # Border is critical: Tesseract rejects tightly cropped short lines.
+    image = ImageOps.expand(image, border=25, fill=255)
+
+    def read(psm):
+        import time
+        started = time.perf_counter()
+        try:
+            return pytesseract.image_to_string(
+                image, lang="kor+eng", config=f"--oem 3 --psm {psm}", timeout=6
+            ).strip()
+        finally:
+            if stats is not None:
+                stats["calls"] = stats.get("calls", 0) + 1
+                stats["seconds"] = round(stats.get("seconds", 0.0)
+                                         + time.perf_counter() - started, 3)
+
+    try:
+        result = _ocr_korean_span(read(7))
+    except pytesseract.TesseractNotFoundError as exc:
+        raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
+    except RuntimeError:
+        if stats is not None:
+            stats.setdefault("timeouts", 0)
+            stats["timeouts"] += 1
+        return ""  # OCR timeout: retain PDF evidence and continue QA.
+    except pytesseract.TesseractError as exc:
+        raise RuntimeError("Tesseract 한국어 언어팩 설치를 확인하세요.") from exc
+    # A narrow one-line OCR pass can stop after the first Korean word.
+    # Decide on the SAME post-processed text that is returned.
+    korean_length = sum(bool(KOR.search(c["c"])) for c in chars)
+    if korean_length >= 10 and len(KOR.findall(result)) < korean_length * .60:
+        try:
+            alternative = _ocr_korean_span(read(6))
+            if len(KOR.findall(alternative)) > len(KOR.findall(result)) * 1.35:
+                result = alternative
+        except (pytesseract.TesseractError, RuntimeError):
+            pass  # Preserve the original OCR candidate as evidence.
+    return result
+
+
+def _aligned(opcode, native, candidate):
+    """Equal text, or a pure whitespace difference, counts as aligned."""
+    tag, i1, i2, j1, j2 = opcode
+    if tag == "equal":
+        return True
+    return not native[i1:i2].strip() and not candidate[j1:j2].strip()
+
+
+def fill_damaged_glyphs(native, candidate):
+    """Fill only U+FFFD holes in native PDF text from an aligned OCR reading.
+
+    Native readable characters are authoritative and are never replaced.
+    A hole is filled only when it sits between exactly aligned native/OCR
+    text and the OCR material in its place is plausible for a glyph hole:
+    a space for a single hole, or the same number of digits ('/', '.', ','
+    kept as aligned literals). Everything else stays unresolved (U+FFFD).
+    Returns (text, filled, unresolved) where filled lists (hole, value).
+    """
+    if "\ufffd" not in native or not candidate:
+        return native, [], native.count("\ufffd")
+    native_hangul = "".join(KOR.findall(native))
+    ocr_hangul = "".join(KOR.findall(candidate))
+    if not native_hangul or SequenceMatcher(None, native_hangul, ocr_hangul,
+                                            autojunk=False).ratio() < .6:
+        return native, [], native.count("\ufffd")
+    matcher = SequenceMatcher(None, native, candidate, autojunk=False)
+    opcodes = matcher.get_opcodes()
+    output, filled = [], []
+    for index, (tag, i1, i2, j1, j2) in enumerate(opcodes):
+        source = native[i1:i2]
+        if "\ufffd" not in source:
+            output.append(source)
+            continue
+        previous_ok = index == 0 or _aligned(opcodes[index - 1], native, candidate)
+        next_ok = index == len(opcodes) - 1 or _aligned(opcodes[index + 1], native, candidate)
+        reading = candidate[j1:j2]
+        value = None
+        core = source.strip()
+        if tag == "replace" and core and set(core) == {"\ufffd"} and core != source:
+            # ' \ufffd' vs '1': whitespace next to the hole is native text and
+            # stays; only the hole itself is evaluated.
+            compact = re.sub(r"\s+", "", reading)
+            if previous_ok and next_ok and compact.isdigit() and len(compact) == len(core):
+                lead = source[:len(source) - len(source.lstrip())]
+                trail = source[len(source.rstrip()):]
+                output.append(lead + compact + trail)
+                filled.append((core, compact))
+            else:
+                output.append(source)
+            continue
+        if tag == "replace" and set(source) != {"\ufffd"}:
+            # Mixed run such as '\ufffd제품과\ufffd' vs ' MET ': the native
+            # letters stay; only boundary holes facing an OCR space are filled.
+            pieces = list(source)
+            if pieces[0] == "\ufffd" and reading[:1].isspace() and previous_ok:
+                pieces[0] = " "
+                filled.append(("\ufffd", " "))
+            if pieces[-1] == "\ufffd" and reading[-1:].isspace() and next_ok:
+                pieces[-1] = " "
+                filled.append(("\ufffd", " "))
+            output.append("".join(pieces))
+            continue
+        if tag == "replace" and previous_ok and next_ok and set(source) == {"\ufffd"}:
+            compact = re.sub(r"\s+", "", reading)
+            if not compact and len(source) == 1:
+                value = " "
+            elif compact.isdigit() and len(compact) == len(source):
+                value = compact
+        if value is None:
+            output.append(source)
+        else:
+            output.append(value)
+            filled.append((source, value))
+    text = "".join(output)
+    return text, filled, text.count("\ufffd")
 
 
 def repair_damaged_native(native, candidate):
@@ -364,21 +505,97 @@ def numeric_peer_for(row, raw_lines):
                   abs(e["bbox"][0]-row["x0"])+abs(e["bbox"][1]-row["y0"]))
 
 
+def _row_for_ocr_line(filename, page_num, region_index, line_index, text, region,
+                      bbox, conf):
+    direction = direction_for(region["rotation"])
+    height = max(1.0, bbox[3] - bbox[1])
+    return {
+        "file": filename, "page": page_num,
+        # Each OCR line is its own block: table cells and badges are never
+        # merged into prose paragraphs by the layout stage.
+        "block_id": f"ocr{region_index}-{line_index}", "line_id": 0,
+        "curved": False, "curve_leading_space": False,
+        "dir_x": direction[0], "dir_y": direction[1],
+        "font_size": round(height, 2), "baseline_y": bbox[3],
+        "korean_text": text,
+        "status": "이미지·벡터 문구 OCR · 원본 확인 필요",
+        "pdf_original": "",
+        "ocr_candidate": text,
+        "numeric_review": bool(re.search(r"\d", text)),
+        "native_numeric_tokens": [],
+        "ocr_numeric_tokens": sorted(numeric_tokens(text)),
+        "warnings": ["텍스트 레이어 없음 · " + ("이미지" if region["kind"] == "image" else "벡터 윤곽")
+                     + " 영역 350 DPI OCR 판독 · 원본 확인 필요"],
+        "raw_evidence_ids": [f"p{page_num}:ocr-region{region_index}"],
+        "source_citation": "",
+        "text_source": "image_ocr" if region["kind"] == "image" else "vector_ocr",
+        "ocr_reconstructed": True, "region_ocr": True, "ocr_confidence": conf,
+        "ocr_filled": [],
+        "x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3],
+        "numeric_peer_evidence": [],
+    }
+
+
+def _compact_korean(text):
+    return re.sub(r"[^가-힣0-9A-Za-z]", "", text or "")
+
+
+def _region_rows(filename, page_num, regions, region_lines, region_sizes, dpi,
+                 existing_texts):
+    rows = []
+    for index, (region, lines, size) in enumerate(zip(regions, region_lines, region_sizes)):
+        # Small outline / badge regions are mostly logos; demand a clearly
+        # read Korean word there. Large Korean panels use the normal gate.
+        strict = region["kind"] == "vector" and region.get("glyphs", 0) < 100
+        useful = [line for line in lines
+                  if len(KOR.findall(line["text"])) >= (3 if strict else 2)
+                  and line["conf"] >= (85 if strict else 45)]
+        if not useful:
+            continue
+        # Inside a Korean panel (e.g. 한글표시사항 table) keep every row that
+        # carries Korean, including rows that are mostly Latin
+        # ('제조자 SUPOR VIETNAM CO.,LTD').
+        useful = [line for line in lines
+                  if KOR.search(line["text"]) and line["conf"] >= 45]
+        if region["kind"] == "image":
+            # One badge = one printed unit: keep all its lines in order.
+            kept = [line for line in lines if line["conf"] >= 45 and line["text"].strip()]
+            text = " ".join(line["text"] for line in kept)
+            box = (min(l["bbox"][0] for l in kept), min(l["bbox"][1] for l in kept),
+                   max(l["bbox"][2] for l in kept), max(l["bbox"][3] for l in kept))
+            groups = [(text, box, round(sum(l["conf"] for l in kept) / len(kept), 1))]
+        else:
+            groups = [(line["text"], line["bbox"], line["conf"]) for line in useful]
+        for line_index, (text, box, conf) in enumerate(groups):
+            compact = _compact_korean(text)
+            if any(compact and (compact in other or other in compact)
+                   for other in existing_texts if len(other) >= 4):
+                continue  # already extracted from the native text layer
+            pdf_box = crop_box_to_pdf(region, box, size, dpi)
+            rows.append(_row_for_ocr_line(filename, page_num, index, line_index,
+                                          text, region, pdf_box, conf))
+    return rows
+
+
 def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
+    import time
     rows, summaries = [], []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         if max_pages is not None and doc.page_count > max_pages:
             raise ValueError(f"파일이 최대 페이지 수({max_pages})를 초과했습니다.")
         for page_num, page in enumerate(doc, 1):
+            started = time.perf_counter()
+            stats = {"batch": {}, "fallback": {}, "damaged_lines": 0, "regions": 0}
+            warnings_page = []
             page_rows = 0
             ocr_lines = 0
             rawdict = page.get_text("rawdict", flags=0)
             raw_lines = all_raw_lines(page, rawdict=rawdict)
             previous_raw_by_block = {}
+            segments = []
             for block_id, block in enumerate(rawdict["blocks"]):
                 for line_id, line in enumerate(block.get("lines", [])):
-                    evidence_id = f"p{page_num}:b{block_id}:l{line_id}"
                     full_text = "".join(
                         c["c"] for span in line.get("spans", [])
                         for c in span.get("chars", [])
@@ -389,108 +606,260 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                     if not segment:
                         continue
                     chars, native = segment
-                    # Keep the literal whitespace directly before the first
-                    # Korean glyph, even if it was removed from the substring
-                    # used for OCR. On circular labels a new rotated PDF span
-                    # can begin with a real word separator (e.g. " 팬 • T").
-                    original_chars = [c["c"] for span in line["spans"] for c in span["chars"]]
-                    first_korean = next(
-                        (i for i, ch in enumerate(original_chars) if KOR.search(ch)),
-                        None,
-                    )
-                    curve_leading_space = bool(
-                        first_korean is not None
-                        and first_korean > 0
-                        and original_chars[first_korean - 1].isspace()
-                    )
                     direction = line.get("dir", (1, 0))
-                    curved = abs(direction[1]) > .3
-                    broken = "\ufffd" in native
-                    candidate = ""
-                    numeric_sensitive = bool(NUMERIC_CONTEXT.search(native) or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", native))
-                    if (broken or mode == "all") and not curved:
-                        candidate = tight_ocr(
-                            page, line, chars, dpi,
-                            numeric_context=numeric_sensitive,
-                        )
-                        ocr_lines += 1
-                    if broken:
-                        best, repaired_parts = repair_damaged_native(native, candidate)
-                        status = (
-                            "부분 복원 · 원본 확인" if "\ufffd" in best
-                            else "OCR 복원 후보 · 검증 필요"
-                        )
-                    else:
-                        best = native
-                        status = "곡선 배치 · 연결 확인" if curved else "원본 추출 정상"
-                    source_numbers = numeric_tokens(native)
-                    ocr_numbers = numeric_tokens(candidate)
-                    explicit_damage = bool(re.search(
-                        r"\ufffd{1,6}\s*(?:%|/\s*\ufffd)", native
-                    ))
-                    numeric_discrepancy = bool(
-                        explicit_damage or numeric_evidence_disagrees(native, candidate)
-                    )
-                    citation, citation_warnings = source_citation_prefix(
-                        full_text, previous_text
-                    )
-                    if citation and KOR.search(native):
-                        best = merge_source_citation(citation, best, full_text)
-                    warnings = []
-                    if numeric_discrepancy:
-                        warnings.append("수치 대조 필요 · 원본 확인")
-                        status = "수치 대조 필요 · 원본 확인"
-                    elif broken:
-                        warnings.append("손상된 글자 · OCR 원본 대조 필요")
-                    warnings.extend(citation_warnings)
-                    warnings.extend(candidate_quality_warnings(native, candidate))
-                    if citation_warnings and not numeric_discrepancy:
-                        status = "영문 출처 대조 필요 · 원본 확인"
-                    rows.append({
-                        "file": filename,
-                        "page": page_num,
-                        "block_id": block_id,
-                        "line_id": line_id,
-                        "curved": bool(curved),
-                        "curve_leading_space": curve_leading_space,
-                        "dir_x": round(direction[0], 3),
-                        "dir_y": round(direction[1], 3),
-                        "font_size": round(line["spans"][0]["size"], 2),
-                        "baseline_y": round(line["spans"][0]["origin"][1], 2),
-                        "korean_text": best,
-                        "status": status,
-                        "pdf_original": native,
-                        "ocr_candidate": candidate,
-                        "numeric_review": numeric_discrepancy,
-                        "native_numeric_tokens": sorted(source_numbers),
-                        "ocr_numeric_tokens": sorted(ocr_numbers),
-                        "warnings": warnings,
-                        "raw_evidence_ids": [evidence_id] + (
-                            [f"p{page_num}:b{block_id}:l{line_id-1}"]
-                            if line_id > 0 and "Euromonitor" in citation
-                            and "Euromonitor" not in full_text
-                            else []
-                        ),
-                        "source_citation": citation,
-                        "x0": round(min(c["bbox"][0] for c in chars), 1),
-                        "y0": round(min(c["bbox"][1] for c in chars), 1),
-                        "x1": round(max(c["bbox"][2] for c in chars), 1),
-                        "y1": round(max(c["bbox"][3] for c in chars), 1),
+                    segments.append({
+                        "block_id": block_id, "line_id": line_id, "line": line,
+                        "chars": chars, "native": native, "full_text": full_text,
+                        "previous_text": previous_text, "direction": direction,
+                        "curved": abs(direction[1]) > .3,
+                        "broken": "\ufffd" in native,
                     })
-                    current = rows[-1]
-                    peers = numeric_peer_for(current, raw_lines)
-                    current["numeric_peer_evidence"] = [
-                        {"id": e["id"], "text": e["text"], "bbox": e["bbox"]}
-                        for e in peers[:5]
-                    ]
-                    if peers and not numeric_tokens(current["korean_text"]):
-                        current["numeric_review"] = True
-                        current["warnings"].append("수치 대조 필요 · 숫자 객체 연결 확인")
-                        current["status"] = "수치 대조 필요 · 숫자 객체 연결 확인"
-                    page_rows += 1
+            stats["native_seconds"] = round(time.perf_counter() - started, 3)
+
+            # ---- one rendering + ONE Tesseract process for every crop ----
+            render_started = time.perf_counter()
+            targets = [s for s in segments
+                       if (s["broken"] or mode == "all") and not s["curved"]]
+            images = []
+            for target in targets:
+                target["numeric_sensitive"] = bool(
+                    NUMERIC_CONTEXT.search(target["native"])
+                    or re.search(r"\ufffd{1,5}\s*(?:%|/\s*\ufffd)", target["native"]))
+                rect, upside_down = ocr_crop_rect(
+                    page, target["line"], target["chars"], target["numeric_sensitive"])
+                target["rect_empty"] = rect.is_empty
+                images.append(render_ocr_crop(page, rect, dpi, upside_down,
+                                              line_text_rgb(target["line"]))
+                              if not rect.is_empty else Image.new("L", (10, 10), 255))
+            regions = find_untexted_regions(page, rawdict) if mode != "native" else []
+            region_images = [render_region(page, region, dpi) for region in regions]
+            stats["render_seconds"] = round(time.perf_counter() - render_started, 3)
+            stats["damaged_lines"] = len(targets)
+            stats["regions"] = len(regions)
+            def run_batch(batch_images, psm, key, label):
+                if not batch_images:
+                    return []
+                try:
+                    return batch_ocr(batch_images, psm=psm, stats=stats.setdefault(key, {}))
+                except pytesseract.TesseractNotFoundError as exc:
+                    raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
+                except (RuntimeError, pytesseract.TesseractError) as exc:
+                    warnings_page.append(f"{label} 일괄 OCR 실패 또는 시간 초과: {exc}")
+                    return [[] for _ in batch_images]
+
+            # ONE Tesseract process (layout mode psm 4, a column of lines)
+            # reads: damaged native lines + vector-outline regions + each text
+            # band of small raster badges. Per-crop binarization keeps every
+            # crop independent of its neighbours in the sheet.
+            vector_ids = [i for i, r in enumerate(regions) if r["kind"] == "vector"]
+            image_ids = [i for i, r in enumerate(regions) if r["kind"] == "image"]
+            band_owner, band_images = [], []
+            for i in image_ids:
+                for (top, bottom), band in split_text_bands(region_images[i]):
+                    if band.height > 200:      # picture, not a text line
+                        continue
+                    band_owner.append((i, top))
+                    band_images.append(band)
+            # Process plan (each call = one Tesseract process, 350 DPI crops):
+            #  1. damaged native lines + small vector regions, one sheet;
+            #  2. each large vector panel (e.g. 한글표시사항 table, >=100
+            #     outline glyphs) on its own, so its rows never depend on
+            #     other crops and it is never read twice;
+            #  3. badge text lines from small images, one single-line strip.
+            small_vector = [i for i in vector_ids if regions[i].get("glyphs", 0) < 100]
+            large_vector = [i for i in vector_ids if regions[i].get("glyphs", 0) >= 100]
+            batch_images = images + [region_images[i] for i in small_vector]
+            first = run_batch(batch_images, 4, "batch", "손상 문구·벡터 영역")
+            # Badge text lines: one more process, single-line mode.
+            if band_images:
+                try:
+                    first = first + strip_ocr(band_images, stats=stats.setdefault("badge", {}))
+                except (RuntimeError, pytesseract.TesseractError) as exc:
+                    warnings_page.append(f"이미지 배지 OCR 실패 또는 시간 초과: {exc}")
+                    first = first + [[] for _ in band_images]
+            line_results = first[:len(images)]
+            region_results = [[] for _ in regions]
+            offset = len(images)
+            for i, lines in zip(small_vector, first[offset:offset + len(small_vector)]):
+                region_results[i] = lines
+            offset += len(small_vector)
+            for (i, top), lines in zip(band_owner, first[offset:]):
+                for line in lines:
+                    x0, y0, x1, y1 = line["bbox"]
+                    region_results[i].append(dict(line, bbox=(x0, y0 + top, x1, y1 + top)))
+            for i in large_vector:
+                region_results[i] = run_batch([region_images[i]], 4, "table_reread",
+                                              "한국어 표 영역")[0]
+            # Rows of a Korean panel that came out weak (e.g. a row beside a
+            # pictogram) are re-read as single lines - all of them in ONE
+            # single-line strip - and replaced only when the re-read shows
+            # more Korean with good confidence.
+            weak = []
+            for i in large_vector:
+                image = region_images[i]
+                for index, line in enumerate(region_results[i]):
+                    if line["conf"] < 60 or len(KOR.findall(line["text"])) < 2:
+                        top = max(0, line["bbox"][1] - 8)
+                        bottom = min(image.height, line["bbox"][3] + 8)
+                        if bottom - top >= 12:
+                            weak.append((i, index, image.crop((0, top, image.width, bottom)), top))
+            if weak:
+                try:
+                    reread = strip_ocr([crop for _, _, crop, _ in weak],
+                                       stats=stats.setdefault("line_reread", {}))
+                except (RuntimeError, pytesseract.TesseractError) as exc:
+                    warnings_page.append(f"표 행 재판독 실패 또는 시간 초과: {exc}")
+                    reread = [[] for _ in weak]
+                for (i, index, crop, top), lines in zip(weak, reread):
+                    if not lines:
+                        continue
+                    best = max(lines, key=lambda l: len(KOR.findall(l["text"])))
+                    old_line = region_results[i][index]
+                    others = ["".join(KOR.findall(l["text"])) for k, l in enumerate(region_results[i])
+                              if k != index]
+                    new_korean = "".join(KOR.findall(best["text"]))
+                    duplicate = any(other and SequenceMatcher(None, new_korean, other).ratio() > .6
+                                    for other in others)
+                    if (len(KOR.findall(best["text"])) > len(KOR.findall(old_line["text"]))
+                            and best["conf"] >= 60 and not duplicate):
+                        x0, y0, x1, y1 = best["bbox"]
+                        region_results[i][index] = dict(best, bbox=(x0, y0 + top, x1, y1 + top))
+            ocr_lines = len(targets)
+            for target, lines in zip(targets, line_results):
+                candidate = _ocr_korean_span(" ".join(l["text"] for l in lines))
+                filled_text, filled, unresolved = fill_damaged_glyphs(target["native"], candidate)
+                korean_expected = len(KOR.findall(target["native"]))
+                weak = (len(KOR.findall(candidate)) < korean_expected * .85)
+                if (unresolved or weak or not candidate) and not target["rect_empty"]:
+                    # Verified fallback: re-read just this line on its own.
+                    second = tight_ocr(page, target["line"], target["chars"], dpi,
+                                       numeric_context=target["numeric_sensitive"],
+                                       stats=stats["fallback"])
+                    # Holes the batch reading resolved stay; the individual
+                    # reading may resolve only the remaining holes.
+                    second_text, second_filled, second_unresolved = fill_damaged_glyphs(
+                        filled_text, second)
+                    second_filled = filled + second_filled
+                    if second and (second_unresolved < unresolved or not candidate):
+                        filled_text, filled, unresolved = (
+                            second_text, second_filled, second_unresolved)
+                    if second:
+                        candidate = (candidate + " ‖ " + second) if candidate else second
+                target.update(candidate=candidate, filled_text=filled_text,
+                              filled=filled, unresolved=unresolved)
+
+            for target in segments:
+                block_id, line_id = target["block_id"], target["line_id"]
+                line, chars, native = target["line"], target["chars"], target["native"]
+                full_text, previous_text = target["full_text"], target["previous_text"]
+                evidence_id = f"p{page_num}:b{block_id}:l{line_id}"
+                original_chars = [c["c"] for span in line["spans"] for c in span["chars"]]
+                first_korean = next(
+                    (i for i, ch in enumerate(original_chars) if KOR.search(ch)),
+                    None,
+                )
+                # Keep the literal whitespace directly before the first
+                # Korean glyph on curved labels (e.g. " 팬 • T").
+                curve_leading_space = bool(
+                    first_korean is not None
+                    and first_korean > 0
+                    and original_chars[first_korean - 1].isspace()
+                )
+                direction = target["direction"]
+                curved = target["curved"]
+                broken = target["broken"]
+                candidate = target.get("candidate", "")
+                filled = target.get("filled", [])
+                if broken:
+                    best = target.get("filled_text", native)
+                    status = (
+                        "부분 복원 · 원본 확인" if "\ufffd" in best
+                        else "OCR 복원 후보 · 검증 필요"
+                    )
+                else:
+                    best = native
+                    status = "곡선 배치 · 연결 확인" if curved else "원본 추출 정상"
+                source_numbers = numeric_tokens(native)
+                ocr_numbers = numeric_tokens(candidate)
+                explicit_damage = bool(re.search(
+                    r"\ufffd{1,6}\s*(?:%|/\s*\ufffd)", native
+                ))
+                numeric_discrepancy = bool(
+                    explicit_damage or numeric_evidence_disagrees(native, candidate)
+                    or any(value.strip() for _, value in filled)
+                )
+                citation, citation_warnings = source_citation_prefix(
+                    full_text, previous_text
+                )
+                if citation and KOR.search(native):
+                    best = merge_source_citation(citation, best, full_text)
+                warnings = []
+                if numeric_discrepancy:
+                    warnings.append("수치 대조 필요 · 원본 확인")
+                    status = "수치 대조 필요 · 원본 확인"
+                elif broken:
+                    warnings.append("손상된 글자 · OCR 원본 대조 필요")
+                warnings.extend(citation_warnings)
+                warnings.extend(candidate_quality_warnings(native, candidate))
+                if citation_warnings and not numeric_discrepancy:
+                    status = "영문 출처 대조 필요 · 원본 확인"
+                rows.append({
+                    "file": filename,
+                    "page": page_num,
+                    "block_id": block_id,
+                    "line_id": line_id,
+                    "curved": bool(curved),
+                    "curve_leading_space": curve_leading_space,
+                    "dir_x": round(direction[0], 3),
+                    "dir_y": round(direction[1], 3),
+                    "font_size": round(line["spans"][0]["size"], 2),
+                    "baseline_y": round(line["spans"][0]["origin"][1], 2),
+                    "korean_text": best,
+                    "status": status,
+                    "pdf_original": native,
+                    "ocr_candidate": candidate,
+                    "ocr_filled": [value for _, value in filled],
+                    "ocr_reconstructed": bool(filled),
+                    "text_source": "native_pdf",
+                    "numeric_review": numeric_discrepancy,
+                    "native_numeric_tokens": sorted(source_numbers),
+                    "ocr_numeric_tokens": sorted(ocr_numbers),
+                    "warnings": warnings,
+                    "raw_evidence_ids": [evidence_id] + (
+                        [f"p{page_num}:b{block_id}:l{line_id-1}"]
+                        if line_id > 0 and "Euromonitor" in citation
+                        and "Euromonitor" not in full_text
+                        else []
+                    ),
+                    "source_citation": citation,
+                    "x0": round(min(c["bbox"][0] for c in chars), 1),
+                    "y0": round(min(c["bbox"][1] for c in chars), 1),
+                    "x1": round(max(c["bbox"][2] for c in chars), 1),
+                    "y1": round(max(c["bbox"][3] for c in chars), 1),
+                })
+                current = rows[-1]
+                peers = numeric_peer_for(current, raw_lines)
+                current["numeric_peer_evidence"] = [
+                    {"id": e["id"], "text": e["text"], "bbox": e["bbox"]}
+                    for e in peers[:5]
+                ]
+                if peers and not numeric_tokens(current["korean_text"]):
+                    current["numeric_review"] = True
+                    current["warnings"].append("수치 대조 필요 · 숫자 객체 연결 확인")
+                    current["status"] = "수치 대조 필요 · 숫자 객체 연결 확인"
+                page_rows += 1
+            existing = [_compact_korean(r["korean_text"]) for r in rows
+                        if r["file"] == filename and r["page"] == page_num]
+            extra = _region_rows(filename, page_num, regions, region_results,
+                                 [image.size for image in region_images], dpi, existing)
+            rows.extend(extra)
+            page_rows += len(extra)
+            stats["region_rows"] = len(extra)
+            stats["total_seconds"] = round(time.perf_counter() - started, 3)
             summaries.append({
                 "file": filename, "page": page_num,
                 "korean_lines": page_rows, "ocr_lines": ocr_lines,
+                "ocr_stats": stats, "ocr_warnings": warnings_page,
                 "raw_evidence": raw_lines,
             })
     finally:
@@ -503,7 +872,8 @@ def export_zip(rows, summaries):
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         csv_content = io.StringIO(newline="")
         if rows:
-            writer = csv.DictWriter(csv_content, fieldnames=list(rows[0]))
+            fieldnames = list(dict.fromkeys(key for row in rows for key in row))
+            writer = csv.DictWriter(csv_content, fieldnames=fieldnames, restval="")
             writer.writeheader()
             writer.writerows(rows)
         archive.writestr("korean_only.csv", "\ufeff" + csv_content.getvalue())
