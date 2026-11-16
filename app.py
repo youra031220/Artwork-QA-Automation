@@ -243,7 +243,7 @@ if st.session_state.get("qa_result"):
             # Reconcile OCR before matching, not only while rendering the table.
             # Keep original PDF evidence and mark only genuinely corroborated
             # readings as eligible for an exact reference comparison.
-            matched_groups = prepare_ocr_groups(grouped)
+            matched_groups = join_wrapped_storage_sentences(prepare_ocr_groups(grouped))
             p1_matches = match_phrases(matched_groups, p1_master)
             all_files = sorted({g["file"] for g in grouped} | {m["file"] for m in product_metadata})
             p1_rules = [
