@@ -230,10 +230,18 @@ if st.session_state.get("qa_result"):
                 country = str(meta.get("manufacturing_country", "")).upper()
                 messages = []
                 import re
+                # Include confirmed heat-source category matches as evidence.
+                # Never use reference-only text to infer a PDF claim.
+                heat_matches = [m for m in p1_matches
+                    if m.get("file")==filename and
+                    ("열원" in str(m.get("category","")) or
+                     "INDUCTION" in str(m.get("extracted","")).upper())]
+                observed += " " + " ".join(
+                    str(m.get("extracted","")) for m in heat_matches)
                 no_induction = bool(re.search(
-                    r"ALL\\s+HOBS\\s+EXCEPT\\s+INDUCTION|인덕션\\s*사용\\s*불가", observed,re.I))
+                    r"ALL\s+HOBS\s+EXCEPT\s+INDUCTION|인덕션\s*사용\s*불가", observed,re.I))
                 yes_induction = bool(re.search(
-                    r"ALL\\s+HOBS\\s*\\+\\s*INDUCTION|인덕션\\s*포함\\s*모든\\s*열원", observed,re.I))
+                    r"ALL\s+HOBS\s*\+\s*INDUCTION|인덕션\s*포함\s*모든\s*열원", observed,re.I))
                 if yes_induction and no_induction:
                     messages.append("⚠️ 인덕션 사용 가능·불가 문구가 함께 발견됨 — 문구 충돌 확인")
                 elif no_induction:
@@ -248,11 +256,11 @@ if st.session_state.get("qa_result"):
                     messages.append("✓ 제조국 "+country+" — Made in France 배지 필수 대상 아님")
                 else:
                     messages.append("□ 제조국 미확인 — Made in France 배지 적용 여부 확인")
-                if re.search(r"RECYCLABLE\\s+METAL|재활용\\s*가능",observed,re.I):
+                if re.search(r"RECYCLABLE\s+METAL|재활용\s*가능",observed,re.I):
                     messages.append("□ 재활용 관련 텍스트 확인 — 재활용 마크와 안내 문구의 동시 표기 확인 필요 (유리뚜껑 제외 여부도 확인)")
                 else:
                     messages.append("□ 재활용 마크가 실제 있다면 재활용 안내 문구 필수 — 로고 및 문구 확인 필요")
-                if re.search(r"world\\s*N[°ºo]?\\s*1|세계\\s*판매\\s*1\\s*위|Euromonitor",observed,re.I):
+                if re.search(r"world\s*N[°ºo]?\s*1|세계\s*판매\s*1\s*위|Euromonitor",observed,re.I):
                     messages.append("□ 세계 1위 관련 문구 확인 — 빨간색 Tefal WORLD N°1 로고와 국·영문 Euromonitor 각주, 에디션/기준 연도 확인")
                 else:
                     messages.append("□ 세계 1위 로고가 실제 있다면 국·영문 Euromonitor 각주 필수 — 확인 필요")
