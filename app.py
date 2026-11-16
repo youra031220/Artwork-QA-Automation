@@ -256,16 +256,35 @@ if st.session_state.get("qa_result"):
                     messages.append("✓ 제조국 "+country+" — Made in France 배지 필수 대상 아님")
                 else:
                     messages.append("□ 제조국 미확인 — Made in France 배지 적용 여부 확인")
-                if re.search(r"RECYCLABLE\s+METAL|재활용\s*가능",observed,re.I):
-                    messages.append("✓ 재활용 관련 문구 발견 — 재활용 마크가 실제 있는지 확인 필요")
-                    if re.search(r"유리\\s*뚜껑\\s*제외|except\\s+(?:the\\s+)?(?:glass\\s+)?lid", observed, re.I):
-                        messages.append("✓ 유리뚜껑 제외 문구 발견 — 제품 구성에 맞는 문구인지 확인 필요")
-                    elif re.search(r"glass\\s+lid|with\\s+lid|뚜껑\\s*포함|유리\\s*뚜껑", str(meta.get("product_type_raw", ""))+" "+observed, re.I):
-                        messages.append("□ 뚜껑 포함 관련 문구 발견 — 유리뚜껑 포함 제품인지 및 재활용 안내의 제외 문구 확인 필요")
-                    else:
-                        messages.append("✓ 유리뚜껑 포함 근거 미발견 — 유리뚜껑 제외 문구 확인 대상으로 자동 분류하지 않음")
+                # Lid evidence comes from the product ticket AND printed translations.
+                # + CV = avec couvercle; do not equate a generic lid with a
+                # verified glass lid unless the source says glass.
+                lid_source = observed + " " + str(meta.get("product_type_raw", ""))
+                has_lid = bool(re.search(
+                    r"\+\s*CV\b|AVEC\s+COUVERCLE|WITH\s+(?:GLASS\s+)?LID|"
+                    r"STEWPOT\s+WITH\s+LID|뚜껑\s*포함|뚜껑포함", lid_source, re.I))
+                glass_lid = bool(re.search(
+                    r"GLASS\s+LID|COUVERCLE\s+EN\s+VERRE|유리\s*뚜껑", lid_source, re.I))
+                recycling_note = bool(re.search(
+                    r"적절한\s*분리\s*배출|적절한\s*분리배출|RECYCLABLE\s+METAL|재활용\s*가능|재활용\s*가능합니다", observed, re.I))
+                excluded_lid = bool(re.search(
+                    r"유리\s*뚜껑\s*제외|EXCEPT\s+(?:THE\s+)?(?:GLASS\s+)?LID", observed, re.I))
+                if has_lid:
+                    messages.append("✓ 뚜껑 포함 문구 발견 (+ CV / AVEC COUVERCLE / WITH LID / 뚜껑포함)")
                 else:
-                    messages.append("□ 재활용 마크가 실제 있다면 재활용 안내 문구 필수 — 로고 및 문구 확인 필요")
+                    messages.append("□ 뚜껑 포함 문구 미발견 — 제품 구성 확인 필요")
+                if recycling_note:
+                    messages.append("✓ 재활용 안내 문구 발견 — 재활용 마크 확인 필요")
+                else:
+                    messages.append("□ 재활용 안내 문구 미발견 — 재활용 마크가 있다면 안내 문구 확인 필요")
+                if excluded_lid:
+                    messages.append("✓ 재활용 문구에 '(유리뚜껑 제외)' 표기 발견")
+                elif glass_lid:
+                    messages.append("□ 유리뚜껑 포함 근거 발견 — 재활용 문구에 '(유리뚜껑 제외)' 표기 확인 필요")
+                elif has_lid:
+                    messages.append("□ 뚜껑 포함 확인 — 유리뚜껑인지 확인 필요 (유리뚜껑이면 재활용 제외 문구 필수)")
+                else:
+                    messages.append("— 유리뚜껑 포함 근거 미발견 — 제외 문구 적용 여부는 미확정")
                 if re.search(r"world\s*N[°ºo]?\s*1|세계\s*판매\s*1\s*위|Euromonitor",observed,re.I):
                     messages.append("□ 세계 1위 관련 문구 확인 — 빨간색 Tefal WORLD N°1 로고와 국·영문 Euromonitor 각주, 에디션/기준 연도 확인")
                 else:
