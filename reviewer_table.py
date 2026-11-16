@@ -7,14 +7,24 @@ All PDF/workbook strings are HTML escaped.
 from html import escape
 
 COLUMNS = (
-    ("문구 카테고리", 13),
-    ("언어", 6),
-    ("PDF 추출 문구", 29),
-    ("원장 기준 문구", 26),
-    ("문구 유형", 8),
-    ("대조 결과", 9),
-    ("확인할 사항", 9),
+    ("문구 카테고리", 9),
+    ("언어", 5),
+    ("PDF 추출 문구", 21),
+    ("원장 기준 문구", 19),
+    ("문구 유형", 7),
+    ("대조 결과", 11),
+    ("PDF 원본", 28),
 )
+
+
+def _pdf_image(value):
+    """Only an inline JPEG/PNG data URI produced by phrase_crop is allowed."""
+    value = str(value or "")
+    if value.startswith(("data:image/jpeg;base64,", "data:image/png;base64,")) \
+            and '"' not in value and "<" not in value:
+        return f'<img class="artwork-qa-crop" src="{value}" alt="PDF 원본 위치">'
+    return '<span class="artwork-qa-unknown">원본 위치 없음</span>'
+
 
 
 def _safe(value):
@@ -43,6 +53,9 @@ def reviewer_html_table(records):
 .artwork-qa-table .artwork-qa-en td {background:rgba(128,128,128,.045);}
 .artwork-qa-table .artwork-qa-pair {border-top:2px solid rgba(128,128,128,.35);}
 .artwork-qa-table .artwork-qa-unknown {opacity:.70;}
+.artwork-qa-table .artwork-qa-note {font-size:11.5px;opacity:.75;margin-top:4px;}
+.artwork-qa-table .artwork-qa-crop {width:100%;height:auto;display:block;
+  border:1px solid rgba(128,128,128,.25);border-radius:3px;background:#fff;}
 </style>"""
     cols="<colgroup>"+ "".join(
         f'<col style="width:{width}%">' for _,width in COLUMNS
@@ -61,11 +74,14 @@ def reviewer_html_table(records):
         common=(
             f'<td rowspan="2" class="artwork-qa-pair">{category}</td>'
         )
-        # Category, type, result and issue are one logical inspection unit.
+        # Short reason under the verdict (former '확인할 사항' column).
+        issue=record.get("확인할 사항")
+        note=f'<div class="artwork-qa-note">{_safe(issue)}</div>' if issue else ""
+        # Category, type, result and source image are one inspection unit.
         common_after=(
             f'<td rowspan="2">{_safe(record.get("문구 유형"))}</td>'
-            f'<td rowspan="2">{_safe(record.get("대조 결과"))}</td>'
-            f'<td rowspan="2">{_safe(record.get("확인할 사항"))}</td>'
+            f'<td rowspan="2">{_safe(record.get("대조 결과"))}{note}</td>'
+            f'<td rowspan="2">{_pdf_image(record.get("PDF 원본 이미지"))}</td>'
         )
         body.append(
             '<tr class="artwork-qa-ko">'+common+

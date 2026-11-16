@@ -604,7 +604,9 @@ def _region_rows(filename, page_num, regions, region_lines, region_sizes, dpi,
             if any(compact and (compact in other or other in compact)
                    for other in existing_texts if len(other) >= 4):
                 continue  # already extracted from the native text layer
-            pdf_box = crop_box_to_pdf(region, box, size, dpi)
+            # A badge is one printed unit: point at the whole image region.
+            pdf_box = ([round(v, 1) for v in region["rect"]] if region["kind"] == "image"
+                       else crop_box_to_pdf(region, box, size, dpi))
             rows.append(_row_for_ocr_line(filename, page_num, index, line_index,
                                           text, region, pdf_box, conf))
     return rows

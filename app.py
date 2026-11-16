@@ -66,6 +66,12 @@ def _cached_extract_content(pdf_bytes, dpi):
     return extract_pdf(pdf_bytes, "__pdf__", dpi=dpi)
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def cached_phrase_crops(pdf_bytes, requests):
+    from phrase_crop import crop_data_uris
+    return crop_data_uris(pdf_bytes, requests)
+
+
 def cached_extract_pdf(pdf_bytes, filename, dpi):
     import copy
     rows, info = copy.deepcopy(_cached_extract_content(pdf_bytes, dpi))
@@ -187,7 +193,7 @@ if st.session_state.get("qa_result"):
         grouped = ensure_group_coverage(grouped, rows)
         grouped = join_wrapped_storage_sentences(grouped)
         st.subheader("전체 문구 및 검수 결과")
-        st.caption("제품별로 모든 한국어 문구를 확인합니다. 여러 줄로 인쇄된 한 문장은 하나로 묶어 표시하며, 확인할 사항은 마지막 열에 표시됩니다.")
+        st.caption("제품별로 모든 한국어 문구를 확인합니다. 여러 줄로 인쇄된 한 문장은 하나로 묶어 표시합니다. 마지막 열은 문구가 인쇄된 PDF 원본 부분이며, 빨간 테두리가 추출 위치입니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
         try:
             p1_master = load_p0_master()
@@ -394,6 +400,27 @@ if st.session_state.get("qa_result"):
                     "기준 영문": match.get("reference_english", ""),
                     "확인할 사항": reviewer_issue,
                 })
+            # PDF 원본 column: crop of each phrase's printed source lines.
+            uploaded_bytes = {f.name: f.getvalue() for f in (files or [])}
+            for filename in all_files:
+                pdf_bytes = uploaded_bytes.get(filename)
+                file_matches = [m for m in p1_matches if m["file"] == filename]
+                if not pdf_bytes or not file_matches:
+                    continue
+                requests = []
+                for match in file_matches:
+                    coordinates = [c for c in match.get("source_coordinates") or []
+                                   if len(c.get("bbox") or []) == 4]
+                    page_no = (coordinates[0].get("page") if coordinates else None) or match.get("page") or 1
+                    boxes = tuple(tuple(float(v) for v in c["bbox"]) for c in coordinates
+                                  if (c.get("page") or page_no) == page_no)
+                    first = next((i for i in match.get("line_indices") or []
+                                  if isinstance(i, int) and 0 <= i < len(rows)), None)
+                    upside_down = bool(first is not None and float(rows[first].get("dir_x", 1)) < -.8)
+                    requests.append((int(page_no), boxes, upside_down))
+                images = cached_phrase_crops(pdf_bytes, tuple(requests))
+                for record, image in zip(shown_by_file[filename], images):
+                    record["PDF 원본 이미지"] = image
             for filename in all_files:
                 product_rows = shown_by_file[filename]
                 st.markdown(f"#### {shown_file(filename)}")
