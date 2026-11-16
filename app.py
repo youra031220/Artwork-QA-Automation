@@ -257,7 +257,13 @@ if st.session_state.get("qa_result"):
                 else:
                     messages.append("□ 제조국 미확인 — Made in France 배지 적용 여부 확인")
                 if re.search(r"RECYCLABLE\s+METAL|재활용\s*가능",observed,re.I):
-                    messages.append("□ 재활용 관련 텍스트 확인 — 재활용 마크와 안내 문구의 동시 표기 확인 필요 (유리뚜껑 제외 여부도 확인)")
+                    messages.append("✓ 재활용 관련 문구 발견 — 재활용 마크가 실제 있는지 확인 필요")
+                    if re.search(r"유리\\s*뚜껑\\s*제외|except\\s+(?:the\\s+)?(?:glass\\s+)?lid", observed, re.I):
+                        messages.append("✓ 유리뚜껑 제외 문구 발견 — 제품 구성에 맞는 문구인지 확인 필요")
+                    elif re.search(r"glass\\s+lid|with\\s+lid|뚜껑\\s*포함|유리\\s*뚜껑", str(meta.get("product_type_raw", ""))+" "+observed, re.I):
+                        messages.append("□ 뚜껑 포함 관련 문구 발견 — 유리뚜껑 포함 제품인지 및 재활용 안내의 제외 문구 확인 필요")
+                    else:
+                        messages.append("✓ 유리뚜껑 포함 근거 미발견 — 유리뚜껑 제외 문구 확인 대상으로 자동 분류하지 않음")
                 else:
                     messages.append("□ 재활용 마크가 실제 있다면 재활용 안내 문구 필수 — 로고 및 문구 확인 필요")
                 if re.search(r"world\s*N[°ºo]?\s*1|세계\s*판매\s*1\s*위|Euromonitor",observed,re.I):
