@@ -4,7 +4,7 @@ Synthetic strings only; no company artwork is committed.
 """
 import unittest
 
-from extractor import _ocr_korean_span, fill_damaged_glyphs
+from extractor import _ocr_korean_span, fill_damaged_glyphs, merge_hole_readings
 from layout import group_paragraphs
 from embedded_reference import load_master
 from phrase_matcher import match_phrases
@@ -52,6 +52,25 @@ class HoleFillTests(unittest.TestCase):
         text, _, unresolved = fill_damaged_glyphs(f"테팔 세계판매 {H}위 주방용품.", "테팔 세계판매1위 주방용품.")
         self.assertEqual(text, "테팔 세계판매 1위 주방용품.")
         self.assertEqual(unresolved, 0)
+
+
+class DigitAgreementTests(unittest.TestCase):
+    def test_single_reading_never_restores_a_digit(self):
+        native = f"{H}{H}/{H}{H} 스테인리스"
+        self.assertEqual(merge_hole_readings(native, ["19/10 스테인리스"]), native)
+
+    def test_conflicting_readings_stay_unresolved(self):
+        native = f"{H}{H}/{H}{H} 스테인리스"
+        merged = merge_hole_readings(native, ["19/10 스테인리스", "18/10 스테인리스"])
+        self.assertEqual(merged, f"1{H}/10 스테인리스")
+
+    def test_majority_of_three_restores(self):
+        native = f"{H}{H}/{H}{H} 스테인리스"
+        merged = merge_hole_readings(native, ["19/10 스테인리스", "18/10 스테인리스", "18/10 스테인리스"])
+        self.assertEqual(merged, "18/10 스테인리스")
+
+    def test_space_needs_one_reading(self):
+        self.assertEqual(merge_hole_readings(f"공간{H}절약", ["공간 절약"]), "공간 절약")
 
 
 class WorldFootnoteJoinTests(unittest.TestCase):

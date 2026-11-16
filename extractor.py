@@ -182,7 +182,7 @@ def render_ocr_crop(page, rect, dpi, upside_down=False, text_rgb=None):
     return image
 
 
-def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None):
+def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None, psm=7):
     """Individual OCR of one damaged line (fallback path)."""
     rect, upside_down = ocr_crop_rect(page, line, chars, numeric_context)
     if rect.is_empty:
@@ -205,7 +205,7 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None):
                                          + time.perf_counter() - started, 3)
 
     try:
-        result = _ocr_korean_span(read(7))
+        result = _ocr_korean_span(read(psm))
     except pytesseract.TesseractNotFoundError as exc:
         raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
     except RuntimeError:
@@ -303,6 +303,34 @@ def fill_damaged_glyphs(native, candidate):
             filled.append((source, value))
     text = "".join(output)
     return text, filled, text.count("\ufffd")
+
+
+def merge_hole_readings(native, readings):
+    """Combine several hole-filled readings of the SAME native line.
+
+    fill_damaged_glyphs() is length preserving, so position i of every
+    reading corresponds to native[i]. A digit is accepted only when at
+    least two independent OCR readings agree on it; a disagreement or a
+    single reading leaves the hole unresolved (shown as □). A space needs
+    one reading and no competing digit.
+    """
+    output = list(native)
+    for index, char in enumerate(native):
+        if char != "\ufffd":
+            continue
+        values = [reading[index] for reading in readings
+                  if len(reading) == len(native) and reading[index] != "\ufffd"]
+        digits = [value for value in values if value.isdigit()]
+        if digits:
+            ranked = sorted(((digits.count(d), d) for d in set(digits)), reverse=True)
+            top_count, top = ranked[0]
+            runner_up = ranked[1][0] if len(ranked) > 1 else 0
+            # At least two readings agree AND they outnumber any other digit.
+            if top_count >= 2 and top_count > runner_up and " " not in values:
+                output[index] = top
+        elif " " in values:
+            output[index] = " "
+    return "".join(output)
 
 
 def repair_damaged_native(native, candidate):
@@ -660,16 +688,33 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                         continue
                     band_owner.append((i, top))
                     band_images.append(band)
-            # Process plan (each call = one Tesseract process, 350 DPI crops):
-            #  1. damaged native lines + small vector regions, one sheet;
-            #  2. each large vector panel (e.g. 한글표시사항 table, >=100
-            #     outline glyphs) on its own, so its rows never depend on
-            #     other crops and it is never read twice;
-            #  3. badge text lines from small images, one single-line strip.
-            small_vector = [i for i in vector_ids if regions[i].get("glyphs", 0) < 100]
-            large_vector = [i for i in vector_ids if regions[i].get("glyphs", 0) >= 100]
-            batch_images = images + [region_images[i] for i in small_vector]
-            first = run_batch(batch_images, 4, "batch", "손상 문구·벡터 영역")
+            # Process plan (each call = one Tesseract process, 350 DPI crops).
+            # Streamlit Cloud cost scales with OCR'd PIXELS, so sheets carry
+            # no blank padding:
+            #  1. all damaged native lines side by side in ONE single-line
+            #     strip (psm 7, the mode proven for these lines);
+            #  2. each dense outline panel (>= 60 glyphs, e.g. the
+            #     한글표시사항 table) on its own (psm 4 keeps table rows);
+            #  3. badge text lines from small images in one strip (psm 7).
+            # Sparse outline clusters (< 60 glyphs: logos, pictograms) are not
+            # OCR'd; they are counted in the timing table.
+            large_vector = [i for i in vector_ids if regions[i].get("glyphs", 0) >= 60]
+            stats["skipped_small_vector_regions"] = len(vector_ids) - len(large_vector)
+            # Lines whose holes are NUMBERS are read on their own twice (tight
+            # and wide crop, psm 7) and a digit is used only if both agree.
+            # Lines with only spacing/letter holes share one strip.
+            for target in targets:
+                target["numeric_hole"] = bool(re.search(
+                    r"\ufffd+\s*(?:%|/|배|개|년|위)|/\s*\ufffd", target["native"]))
+            strip_ids = [k for k, t in enumerate(targets) if not t["numeric_hole"]]
+            first = [[] for _ in images]
+            if strip_ids:
+                try:
+                    for k, lines in zip(strip_ids, strip_ocr(
+                            [images[k] for k in strip_ids], stats=stats.setdefault("batch", {}))):
+                        first[k] = lines
+                except (RuntimeError, pytesseract.TesseractError) as exc:
+                    warnings_page.append(f"손상 문구 일괄 OCR 실패 또는 시간 초과: {exc}")
             # Badge text lines: one more process, single-line mode.
             if band_images:
                 try:
@@ -680,9 +725,6 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
             line_results = first[:len(images)]
             region_results = [[] for _ in regions]
             offset = len(images)
-            for i, lines in zip(small_vector, first[offset:offset + len(small_vector)]):
-                region_results[i] = lines
-            offset += len(small_vector)
             for (i, top), lines in zip(band_owner, first[offset:]):
                 for line in lines:
                     x0, y0, x1, y1 = line["bbox"]
@@ -726,27 +768,52 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                         region_results[i][index] = dict(best, bbox=(x0, y0 + top, x1, y1 + top))
             ocr_lines = len(targets)
             for target, lines in zip(targets, line_results):
-                candidate = _ocr_korean_span(" ".join(l["text"] for l in lines))
-                filled_text, filled, unresolved = fill_damaged_glyphs(target["native"], candidate)
-                korean_expected = len(KOR.findall(target["native"]))
-                weak = (len(KOR.findall(candidate)) < korean_expected * .85)
-                if (unresolved or weak or not candidate) and not target["rect_empty"]:
-                    # Verified fallback: re-read just this line on its own.
-                    second = tight_ocr(page, target["line"], target["chars"], dpi,
-                                       numeric_context=target["numeric_sensitive"],
-                                       stats=stats["fallback"])
-                    # Holes the batch reading resolved stay; the individual
-                    # reading may resolve only the remaining holes.
-                    second_text, second_filled, second_unresolved = fill_damaged_glyphs(
-                        filled_text, second)
-                    second_filled = filled + second_filled
-                    if second and (second_unresolved < unresolved or not candidate):
-                        filled_text, filled, unresolved = (
-                            second_text, second_filled, second_unresolved)
-                    if second:
-                        candidate = (candidate + " ‖ " + second) if candidate else second
+                native = target["native"]
+                if target["rect_empty"]:
+                    target.update(candidate="", filled_text=native, filled=[],
+                                  unresolved=native.count("\ufffd"), digit_disagreement=False)
+                    continue
+                readings, candidates = [], []
+                if target["numeric_hole"]:
+                    for wide in (False, True):
+                        reading = tight_ocr(page, target["line"], target["chars"], dpi,
+                                            numeric_context=wide, stats=stats["fallback"])
+                        if reading:
+                            candidates.append(reading)
+                            readings.append(fill_damaged_glyphs(native, reading)[0])
+                    if "\ufffd" in merge_hole_readings(native, readings):
+                        # Tie-break with a third independent mode (raw line).
+                        reading = tight_ocr(page, target["line"], target["chars"], dpi,
+                                            numeric_context=False, stats=stats["fallback"],
+                                            psm=13)
+                        if reading:
+                            candidates.append(reading)
+                            readings.append(fill_damaged_glyphs(native, reading)[0])
+                else:
+                    candidate = _ocr_korean_span(" ".join(l["text"] for l in lines))
+                    first_text, _, unresolved = fill_damaged_glyphs(native, candidate)
+                    if candidate:
+                        candidates.append(candidate)
+                        readings.append(first_text)
+                    weak = len(KOR.findall(candidate)) < len(KOR.findall(native)) * .85
+                    if unresolved or weak or not candidate:
+                        second = tight_ocr(page, target["line"], target["chars"], dpi,
+                                           numeric_context=target["numeric_sensitive"],
+                                           stats=stats["fallback"])
+                        if second:
+                            candidates.append(second)
+                            readings.append(fill_damaged_glyphs(native, second)[0])
+                candidate = " ‖ ".join(candidates)
+                filled_text = merge_hole_readings(native, readings)
+                filled = [(h, v) for h, v in zip(native, filled_text)
+                          if h == "\ufffd" and v != "\ufffd"]
+                disagreement = any(
+                    len(r) == len(native) and r[i] != "\ufffd" and r[i].isdigit()
+                    and filled_text[i] == "\ufffd"
+                    for r in readings for i in range(len(native)))
                 target.update(candidate=candidate, filled_text=filled_text,
-                              filled=filled, unresolved=unresolved)
+                              filled=filled, unresolved=filled_text.count("\ufffd"),
+                              digit_disagreement=disagreement)
 
             for target in segments:
                 block_id, line_id = target["block_id"], target["line_id"]
@@ -801,6 +868,8 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                     warnings.append("손상된 글자 · OCR 원본 대조 필요")
                 warnings.extend(citation_warnings)
                 warnings.extend(candidate_quality_warnings(native, candidate))
+                if target.get("digit_disagreement"):
+                    warnings.append("OCR 숫자 판독 불일치 · 숫자 미복원(□) · 원본 PDF 확인 필요")
                 if citation_warnings and not numeric_discrepancy:
                     status = "영문 출처 대조 필요 · 원본 확인"
                 rows.append({
