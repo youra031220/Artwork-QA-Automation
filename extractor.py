@@ -109,7 +109,7 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
         return ""
     pix = page.get_pixmap(
         clip=rect,
-        matrix=fitz.Matrix(dpi / 72, dpi / 72),
+        matrix=fitz.Matrix(min(dpi, 180) / 72, min(dpi, 180) / 72),
         alpha=False,
     )
     image = Image.open(io.BytesIO(pix.tobytes("png")))
@@ -120,10 +120,12 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
     image = ImageOps.expand(image, border=25, fill=255)
     try:
         result = pytesseract.image_to_string(
-            image, lang="kor+eng", config="--oem 3 --psm 7"
+            image, lang="kor+eng", config="--oem 3 --psm 7", timeout=6
         ).strip()
     except pytesseract.TesseractNotFoundError as exc:
         raise RuntimeError("Tesseract 프로그램 설치가 필요합니다. packages.txt를 확인하세요.") from exc
+    except RuntimeError:
+        return ""  # OCR timeout: retain PDF evidence and continue QA.
     except pytesseract.TesseractError as exc:
         raise RuntimeError("Tesseract 한국어 언어팩 설치를 확인하세요.") from exc
     # A narrow one-line OCR pass can stop after the first Korean word.
@@ -133,11 +135,11 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False):
     if (korean_length >= 10 and result_korean_length < korean_length * .60):
         try:
             alternative = pytesseract.image_to_string(
-                image, lang="kor+eng", config="--oem 3 --psm 6"
+                image, lang="kor+eng", config="--oem 3 --psm 6", timeout=6
             ).strip()
             if len(KOR.findall(alternative)) > result_korean_length * 1.35:
                 result = alternative
-        except pytesseract.TesseractError:
+        except (pytesseract.TesseractError, RuntimeError):
             pass  # Preserve the original OCR candidate as evidence.
     result = re.sub(r"\s+", " ", result)
     match = KOR.search(result)
