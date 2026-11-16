@@ -186,7 +186,12 @@ if st.session_state.get("qa_result"):
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
         try:
             p1_master = load_p0_master()
-            p1_matches = match_phrases(grouped, p1_master)
+            # Reconcile OCR before matching, not only while rendering the table.
+            # Keep original PDF evidence and mark only genuinely corroborated
+            # readings as eligible for an exact reference comparison.
+            from ocr_pre_match import prepare_ocr_groups
+            matched_groups = prepare_ocr_groups(grouped)
+            p1_matches = match_phrases(matched_groups, p1_master)
             all_files = sorted({g["file"] for g in grouped} | {m["file"] for m in product_metadata})
             p1_rules = [
                 result for filename in all_files
