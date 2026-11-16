@@ -355,7 +355,7 @@ if st.session_state.get("qa_result"):
                 if recycling_note:
                     messages.append("✓ 재활용 안내 문구 발견 — 재활용 마크 확인 필요")
                 else:
-                    messages.append("□ 재활용 안내 문구 미발견 — 재활용 마크가 있다면 안내 문구 확인 필요")
+                    messages.append("— 재활용 안내 문구 미발견 — 재활용 마크 유무 확인 필요 (마크가 있으면 안내 문구 누락)")
                 if excluded_lid:
                     messages.append("✓ 재활용 문구에 '(유리뚜껑 제외)' 표기 발견")
                 elif glass_lid:
@@ -364,12 +364,35 @@ if st.session_state.get("qa_result"):
                     messages.append("□ 뚜껑 포함 확인 — 유리뚜껑인지 확인 필요 (유리뚜껑이면 재활용 제외 문구 필수)")
                 else:
                     messages.append("— 유리뚜껑 포함 근거 미발견 — 제외 문구 적용 여부는 미확정")
-                if re.search(r"world\s*N[°ºo]?\s*1|세계\s*판매\s*1\s*위|Euromonitor",observed,re.I):
-                    messages.append("□ 세계 1위 관련 문구 확인 — 빨간색 Tefal WORLD N°1 로고와 국·영문 Euromonitor 각주, 에디션/기준 연도 확인")
+                # Each item states what was FOUND in the PDF text, then the
+                # mark/QR check that a person still has to do.
+                world_ko = bool(re.search(r"세계\s*판매\s*1\s*위|에디션[^/]{0,40}기준", observed))
+                world_en = bool(re.search(
+                    r"world\s*N[°ºo]?\s*1|N[°ºo]\s*1\s+in\s+cookware|"
+                    r"Euromonitor[^/]{0,80}edition", observed, re.I))
+                if world_ko and world_en:
+                    messages.append("□ 세계 1위 각주 국·영문 문구 발견 — Tefal WORLD N°1 로고 확인 필요")
+                elif world_ko or world_en:
+                    found, missing = ("국문", "영문") if world_ko else ("영문", "국문")
+                    messages.append(f"⚠️ 세계 1위 각주 {found} 문구만 발견 ({missing} 미발견) — "
+                                    f"WORLD N°1 로고와 {missing} 각주 확인 필요")
                 else:
-                    messages.append("□ 세계 1위 로고가 실제 있다면 국·영문 Euromonitor 각주 필수 — 확인 필요")
-                messages.append("□ 사용방법 QR — 슬리브 적용 제품이면 QR 및 사용·관리 안내 문구 확인")
-                messages.append("□ Tefal Commitments QR — 적용 대상이면 QR과 우측 로고 확인")
+                    messages.append("— 세계 1위 각주 문구 미발견 — WORLD N°1 로고 유무 확인 필요 "
+                                    "(로고가 있으면 각주 누락)")
+                usage_qr = bool(re.search(r"QR\s*코드|사용\s*방법[^.]{0,30}QR|QR[^.]{0,30}사용\s*방법", observed))
+                if usage_qr:
+                    messages.append("□ 사용방법 QR 안내 문구 발견 — QR 확인 필요")
+                else:
+                    messages.append("— 사용방법 QR 안내 문구 미발견 — 슬리브 적용 제품인지 확인 필요 "
+                                    "(적용 제품이면 QR·안내 문구 누락)")
+                commitments = bool(re.search(
+                    r"COMMITMENTS|ENGAGEMENTS|COMPROMISOS|ZOBOWI[ĄA]ZANIA|TAAHH[ÜU]TLER",
+                    observed, re.I))
+                if commitments:
+                    messages.append("□ Tefal Commitments 문구 발견 (COMMITMENTS / ENGAGEMENTS) — QR·로고 확인 필요")
+                else:
+                    messages.append("— Tefal Commitments 문구 미발견 — 적용 대상 제품인지 확인 필요 "
+                                    "(적용 대상이면 QR·로고 누락)")
                 with st.expander(shown_file(filename)+" · 마크 확인 항목",expanded=True):
                     for message in messages:
                         st.write(message)
