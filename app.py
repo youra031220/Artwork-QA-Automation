@@ -100,22 +100,35 @@ if st.session_state.get("qa_signature") != signature:
 
 if st.button("문구 검수 시작", type="primary", disabled=not files):
     rows, summaries, errors, identity_checks, product_metadata = [], [], [], [], []
-    bar = st.progress(0)
+    bar = st.progress(0, text="검수 준비 중")
     for index, file in enumerate(files):
-        try:
-            extracted, info = extract_pdf(file.getvalue(), file.name, dpi=OCR_DPI)
-            rows.extend(extracted)
-            summaries.extend(info)
-            identity_checks.extend(check_product_identity(file.getvalue(), file.name))
-            meta = parse_product_pdf(file.getvalue(), file.name)
-            product_metadata.append(meta)
-        except Exception as exc:
-            errors.append(f"{file.name}: {exc}")
-        bar.progress((index + 1) / len(files))
+        filename = file.name
+        with st.status(f"{filename} · PDF 검수 진행 중", expanded=True) as run_status:
+            try:
+                st.write("1/3 PDF 문구 추출 및 OCR 처리 중")
+                extracted, info = extract_pdf(file.getvalue(), filename, dpi=OCR_DPI)
+                rows.extend(extracted)
+                summaries.extend(info)
+                st.write("2/3 제품 식별 정보 확인 중")
+                identity_checks.extend(check_product_identity(file.getvalue(), filename))
+                st.write("3/3 제품 정보 분석 중")
+                product_metadata.append(parse_product_pdf(file.getvalue(), filename))
+                run_status.update(label=f"{filename} · 추출 완료", state="complete")
+            except Exception as exc:
+                errors.append(f"{filename}: {type(exc).__name__}: {exc}")
+                run_status.update(label=f"{filename} · 처리 실패", state="error")
+                st.error(errors[-1])
+        bar.progress((index + 1) / len(files), text=f"{index + 1}/{len(files)} PDF 처리 완료")
     st.session_state["qa_result"] = {
         "rows": rows, "summaries": summaries,
         "errors": errors, "identity_checks": identity_checks, "product_metadata": product_metadata,
     }
+    if rows:
+        st.success(f"PDF 추출 완료 · 한국어 문구 {len(rows)}줄 · 결과표 생성 중")
+    elif errors:
+        st.error("PDF 추출 실패 · 위 오류 메시지를 확인하세요")
+    else:
+        st.warning("PDF 처리 완료 · 추출된 한국어 문구가 없습니다.")
 
 if st.session_state.get("qa_result"):
     data = st.session_state["qa_result"]
