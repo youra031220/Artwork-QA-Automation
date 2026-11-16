@@ -210,7 +210,7 @@ if st.session_state.get("qa_result"):
             p1_rules.extend(compare_range_messages(p1_matches, product_metadata))
             # Text-only visual checklist. This does not run any image
             # recognition and never asserts that a logo is present/absent.
-            st.subheader("마크·QR 육안 확인 체크리스트")
+            st.subheader("마크·QR 확인 필요 체크리스트")
             st.caption("엑셀 원장·회의 기준으로 확인할 마크를 안내합니다. 이미지 자동 검출은 하지 않으며, 실제 존재 여부는 PDF를 보고 확인하세요.")
             for filename in all_files:
                 raw = " ".join(
@@ -239,23 +239,23 @@ if st.session_state.get("qa_result"):
                 elif no_induction:
                     messages.append("✓ 인덕션 사용 불가 문구 확인 — IH 인덕션 마크는 필요하지 않음")
                 elif yes_induction:
-                    messages.append("□ 인덕션 사용 가능 문구 확인 — 원형 IH 인덕션 마크가 실제 있는지 육안 확인")
+                    messages.append("□ 인덕션 사용 가능 문구 확인 — 원형 IH 인덕션 마크가 실제 있는지 확인 필요")
                 else:
                     messages.append("□ 열원 문구 확인 불가 — 인덕션 적용 여부부터 확인")
                 if country=="FRANCE":
-                    messages.append("□ 제조국 FRANCE — FABRIQUÉ EN FRANCE / Made in France 배지 육안 확인")
+                    messages.append("□ 제조국 FRANCE — FABRIQUÉ EN FRANCE / Made in France 배지 확인 필요")
                 elif country:
                     messages.append("✓ 제조국 "+country+" — Made in France 배지 필수 대상 아님")
                 else:
                     messages.append("□ 제조국 미확인 — Made in France 배지 적용 여부 확인")
                 if re.search(r"RECYCLABLE\\s+METAL|재활용\\s*가능",observed,re.I):
-                    messages.append("□ 재활용 관련 텍스트 확인 — 재활용 마크와 안내 문구의 동시 표기 육안 확인 (유리뚜껑 제외 여부도 확인)")
+                    messages.append("□ 재활용 관련 텍스트 확인 — 재활용 마크와 안내 문구의 동시 표기 확인 필요 (유리뚜껑 제외 여부도 확인)")
                 else:
-                    messages.append("□ 재활용 마크가 실제 있다면 재활용 안내 문구 필수 — 로고 및 문구 육안 확인")
+                    messages.append("□ 재활용 마크가 실제 있다면 재활용 안내 문구 필수 — 로고 및 문구 확인 필요")
                 if re.search(r"world\\s*N[°ºo]?\\s*1|세계\\s*판매\\s*1\\s*위|Euromonitor",observed,re.I):
                     messages.append("□ 세계 1위 관련 문구 확인 — 빨간색 Tefal WORLD N°1 로고와 국·영문 Euromonitor 각주, 에디션/기준 연도 확인")
                 else:
-                    messages.append("□ 세계 1위 로고가 실제 있다면 국·영문 Euromonitor 각주 필수 — 육안 확인")
+                    messages.append("□ 세계 1위 로고가 실제 있다면 국·영문 Euromonitor 각주 필수 — 확인 필요")
                 messages.append("□ 사용방법 QR — 슬리브 적용 제품이면 QR 및 사용·관리 안내 문구 확인")
                 messages.append("□ Tefal Commitments QR — 적용 대상이면 QR과 우측 로고 확인")
                 with st.expander(shown_file(filename)+" · 마크 확인 항목",expanded=True):
