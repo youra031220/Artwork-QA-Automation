@@ -311,9 +311,18 @@ if st.session_state.get("qa_result"):
                                      f"{finding.get('finding', '')}")
 
             from extractor import numeric_tokens
+            # Only clean numeric readings enter the main results table.
+            # OCR candidates are already generated from the same printed
+            # region by extractor.tight_ocr. Never substitute reference
+            # text or other-language numbers for damaged Korean source.
+            from numeric_display import clean_numeric_reading
+            excluded_by_file = {filename: [] for filename in all_files}
             shown_by_file = {filename: [] for filename in all_files}
             for match in p1_matches:
-                phrase = readable_ocr_review(match)
+                phrase, numeric_problem = clean_numeric_reading(match)
+                if numeric_problem:
+                    excluded_by_file[match["file"]].append(numeric_problem)
+                    continue
                 has_number = bool(numeric_tokens(phrase) or match.get("numeric_review"))
                 is_uncertain = match["status"] in ("OCR_REVIEW", "NUMERIC_MISMATCH",
                     "TEXT_MISMATCH", "AMBIGUOUS_MATCH", "UNREGISTERED")
@@ -346,6 +355,14 @@ if st.session_state.get("qa_result"):
                     st.markdown(reviewer_html_table(product_rows), unsafe_allow_html=True)
                     needing_review = sum(bool(row["확인할 사항"]) for row in product_rows)
                     st.caption(f"추출 문구 {len(product_rows)}개 · 확인 필요 {needing_review}개")
+                if excluded_by_file[filename]:
+                    st.warning(
+                        f"숫자 OCR 재검증 미완료 {len(excluded_by_file[filename])}개 문구는 "
+                        "정상 추출 결과에서 제외했습니다. PDF 원본 확인이 필요합니다."
+                    )
+                    with st.expander("숫자 재검증 실패 항목 · 원본 확인 필요"):
+                        for issue in excluded_by_file[filename]:
+                            st.write(issue)
                 else:
                     st.info("이 제품에서 추출된 문구가 없습니다.")
             st.download_button("문구 검수 보고서 ZIP 다운로드",
