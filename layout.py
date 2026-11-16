@@ -122,9 +122,14 @@ def _should_join_across_blocks(previous, current):
         return True
 
     # Main performance claim is often typeset over three distinct blocks.
-    if re.search(r"테팔 기본 코팅 대비(?: 최대)?$", a) and re.match(r"(?:최대\s*)?\d+\s*배\b", b):
+    # Damaged glyphs (U+FFFD) may stand for spaces or digits until OCR has
+    # restored them; the grouping must not depend on that restoration.
+    gap, digit = r"[\s\ufffd]*", r"[\d\ufffd]+"
+    if (re.search(r"테팔" + gap + "기본" + gap + "코팅" + gap + "대비(?:" + gap + "최대)?$", a)
+            and re.match(r"(?:최대" + gap + ")?" + digit + gap + r"배(?=[\s\ufffd]|$)", b)):
         return True
-    if re.search(r"(?:최대\s*)?\d+\s*배 더 오래가는$", a) and b.startswith("엑스트라 라이프 논스틱 코팅"):
+    if (re.search(r"(?:최대" + gap + ")?" + digit + gap + "배" + gap + "더" + gap + "오래가는$", a)
+            and re.match(r"엑스트라" + gap + "라이프" + gap + "(?:세라믹" + gap + ")?논스틱" + gap + "코팅", b)):
         return True
 
     # A headline can wrap after '1위' while its supporting footnote

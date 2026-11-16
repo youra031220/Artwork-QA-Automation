@@ -147,3 +147,30 @@ class LabelTableExclusionTests(unittest.TestCase):
         self.assertEqual(find_label_tables(page, page.get_text("rawdict", flags=0)), [])
         document, page = self._page(rows=10, with_text=False)
         self.assertEqual(find_label_tables(page, page.get_text("rawdict", flags=0)), [])
+
+
+class CoatingClaimJoinTests(unittest.TestCase):
+    """'테팔 기본 코팅 대비 / 최대 Y배 더 오래가는 / 엑스트라 라이프 논스틱 코팅'
+    is one G7 feature even when the three lines are separate PDF objects and
+    some glyphs are still damaged."""
+
+    def _rows(self, first, second, third):
+        return [row(first, 3, 0, 100, 500, size=14),
+                row(second, 4, 0, 100, 520, size=14),
+                row(third, 5, 0, 100, 540, size=14)]
+
+    def test_damaged_lines_join_into_one_feature(self):
+        groups = group_paragraphs(self._rows(f"테팔{H}기본 코팅 대비", f"최대 {H}배{H}더{H}오래가는",
+                                             "엑스트라 라이프 논스틱 코팅"))
+        self.assertEqual(len(groups), 1)
+        match = match_phrases(groups, load_master())[0]
+        self.assertEqual(match["phrase_id"], "P33")
+        self.assertEqual(match["category"], "G7 특장점")
+
+    def test_restored_lines_match_y_multiplier_variable(self):
+        groups = group_paragraphs(self._rows("테팔 기본 코팅 대비", "최대 3배 더 오래가는",
+                                             "엑스트라 라이프 논스틱 코팅"))
+        self.assertEqual(len(groups), 1)
+        match = match_phrases(groups, load_master())[0]
+        self.assertEqual(match["phrase_id"], "P33")
+        self.assertEqual(match["differences"], "Y=3")

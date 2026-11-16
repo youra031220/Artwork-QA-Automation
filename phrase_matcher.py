@@ -47,10 +47,23 @@ def _variable_year_match(actual, expected):
     return found.groups() if found else None
 
 
+LEDGER_INSTRUCTION = re.compile(r"\s*\((?:Please|please|PLEASE)\b[^)]*\)")
+
+
 def _reference_candidates(master):
+    """Ledger rows for comparison. Editorial instructions written into a
+    Korean cell (e.g. '(Please ensure you observe these line breaks)') are
+    not printed copy, so they are left out of the comparison text only; the
+    ledger itself is not modified."""
     variants = {v["phrase_id"]: v for v in master.get("variants", [])}
-    return [(p, variants.get(p["phrase_id"], {})) for p in master.get("phrases", [])
-            if p.get("korean_original")]
+    output = []
+    for p in master.get("phrases", []):
+        if not p.get("korean_original"):
+            continue
+        cleaned = LEDGER_INSTRUCTION.sub("", p["korean_original"]).strip()
+        output.append((dict(p, korean_original=cleaned) if cleaned != p["korean_original"] else p,
+                       variants.get(p["phrase_id"], {})))
+    return output
 
 
 def _one(row, master):
@@ -109,12 +122,52 @@ def _one(row, master):
                         a["phrase_id"] for a in alternates)) if alternates else "",
                     reason=("원문 손상·숫자 대조 필요" if status=="OCR_REVIEW"
                             else "기준 문구와 일치 (최종 승인 의미 아님)"))
+    # Workbook's Y is a range-specific multiplier placeholder. Identify the
+    # reference but do not claim it is approved before range validation.
+    variable_refs=[]
+    for p,v in refs:
+        expected=p["korean_original"]
+        if "Y배" not in expected and "Y 배" not in expected:
+            continue
+        pattern=re.escape(compact(expected))
+        pattern=pattern.replace("y배", r"(?P<multiplier>\d{1,2})배")
+        match=re.fullmatch(pattern,compact(actual))
+        if match:
+            variable_refs.append((p,v,match.group("multiplier")))
+    if variable_refs:
+        p,v,value=variable_refs[0]
+        return dict(base,status="OCR_REVIEW" if row.get("numeric_review") else "TEXT_MISMATCH",
+                    phrase_id=p["phrase_id"],rule_id=v.get("rule_id",""),
+                    category=p["category_id"],source_row=p.get("source_row"),
+                    approval_status=p.get("approval_status","UNVERIFIED"),
+                    reference_korean=p["korean_original"],
+                    reference_english=p.get("english_original",""),
+                    differences="Y="+value,
+                    reason="정답 데이터의 Y배 변수 후보: 레인지별 승인 배수 검토 필요")
     # Permit a reference substring inside a longer physically grouped line.
     # Never accept a bare one-word anchor or a tiny fragment as a match.
     contains=[(p,v) for p,v in refs if len(compact(p["korean_original"])) >= 12
               and compact(p["korean_original"]) in compact(actual)]
     if contains:
         p,v=max(contains,key=lambda pair:len(pair[0]["korean_original"]))
+        # A longer ledger sentence that covers the WHOLE extracted text (only
+        # damaged glyphs / a variable differ) is the better reference than a
+        # short clause that happens to be contained in it.
+        whole=[(SequenceMatcher(None,compact(actual),compact(q["korean_original"])).ratio(),q,w)
+               for q,w in refs if len(compact(q["korean_original"]))>len(compact(p["korean_original"]))]
+        whole=[t for t in whole if t[0]>=.85]
+        if whole:
+            score,q,w=max(whole,key=lambda t:t[0])
+            damaged=bool(row.get("numeric_review") or DAMAGE.search(actual))
+            return dict(base,status="OCR_REVIEW" if damaged else "TEXT_MISMATCH",
+                        phrase_id=q["phrase_id"],rule_id=w.get("rule_id",""),
+                        category=q["category_id"],source_row=q.get("source_row"),
+                        reference_korean=q["korean_original"],
+                        reference_english=q.get("english_original",""),
+                        approval_status=q.get("approval_status","UNVERIFIED"),
+                        differences="OCR 글자 손상 · 원본 확인" if damaged else "문자·숫자 차이 검토 필요",
+                        reason=("원본 일부 글자·숫자 판독 불가 · 원본 확인 필요" if damaged
+                                else "기준 문구와 일부 다름 · 차이 확인 필요"))
         damaged = bool(row.get("numeric_review") or DAMAGE.search(actual))
         # The workbook phrase may be only one clause of a longer printed
         # statement.  Do not mark the entire statement as approved.
@@ -159,28 +212,6 @@ def _one(row, master):
                     reference_english=p.get("english_original",""),
                     differences="연도 변수: " + ", ".join(values),
                     reason="202X 연도 변수 패턴 일치 · 에디션/매출 기준연도 적합성은 별도 확인")
-    # Workbook's Y is a range-specific multiplier placeholder. Identify the
-    # reference but do not claim it is approved before range validation.
-    variable_refs=[]
-    for p,v in refs:
-        expected=p["korean_original"]
-        if "Y배" not in expected and "Y 배" not in expected:
-            continue
-        pattern=re.escape(compact(expected))
-        pattern=pattern.replace("y배", r"(?P<multiplier>\d{1,2})배")
-        match=re.fullmatch(pattern,compact(actual))
-        if match:
-            variable_refs.append((p,v,match.group("multiplier")))
-    if variable_refs:
-        p,v,value=variable_refs[0]
-        return dict(base,status="OCR_REVIEW" if row.get("numeric_review") else "TEXT_MISMATCH",
-                    phrase_id=p["phrase_id"],rule_id=v.get("rule_id",""),
-                    category=p["category_id"],source_row=p.get("source_row"),
-                    approval_status=p.get("approval_status","UNVERIFIED"),
-                    reference_korean=p["korean_original"],
-                    reference_english=p.get("english_original",""),
-                    differences="Y="+value,
-                    reason="정답 데이터의 Y배 변수 후보: 레인지별 승인 배수 검토 필요")
     # Fuzzy hits only suggest a reference. No automatic approval or rule count.
     scored=[]
     for p,v in refs:
