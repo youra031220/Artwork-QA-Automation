@@ -417,11 +417,11 @@ if st.session_state.get("qa_result"):
                              else "OCR 글자 판독 불확실(□) · 원본 PDF 확인 필요")
                     excluded_by_file[match["file"]].append(phrase)
                 elif match["status"] == "OCR_REVIEW":
-                    issue = "OCR로 복원한 글자·숫자 포함 · 원본 확인 필요"
+                    issue = "원본 글자·숫자 확인 필요"
                 elif is_uncertain:
                     issue = match.get("reason") or "기준 문구 확인 필요"
-                if match.get("ocr_reconstructed") and not issue:
-                    issue = "OCR로 복원한 공백·글자 포함 · 원본 문구 확인 필요"
+                # Glyphs restored by verified OCR (spaces, or digits read the
+                # same by independent passes) are not reported as an issue.
                 needs_review = bool(is_uncertain or unreadable or match.get("region_ocr"))
                 verdict, reviewer_issue = render_policy_status(
                     match, p1_rules,

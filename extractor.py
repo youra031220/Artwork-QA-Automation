@@ -182,6 +182,11 @@ def render_ocr_crop(page, rect, dpi, upside_down=False, text_rgb=None):
     return image
 
 
+# Per-call limit for single-line OCR. Streamlit Cloud CPU throttling made
+# 6 s too short: calls timed out and verified digits fell back to '□'.
+OCR_TIMEOUT = 30
+
+
 def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None, psm=7):
     """Individual OCR of one damaged line (fallback path)."""
     rect, upside_down = ocr_crop_rect(page, line, chars, numeric_context)
@@ -196,7 +201,7 @@ def tight_ocr(page, line, chars, dpi, numeric_context=False, stats=None, psm=7):
         started = time.perf_counter()
         try:
             return pytesseract.image_to_string(
-                image, lang="kor+eng", config=f"--oem 3 --psm {psm}", timeout=6
+                image, lang="kor+eng", config=f"--oem 3 --psm {psm}", timeout=OCR_TIMEOUT
             ).strip()
         finally:
             if stats is not None:
@@ -867,10 +872,16 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
                 explicit_damage = bool(re.search(
                     r"\ufffd{1,6}\s*(?:%|/\s*\ufffd)", native
                 ))
-                numeric_discrepancy = bool(
-                    explicit_damage or numeric_evidence_disagrees(native, candidate)
-                    or any(value.strip() for _, value in filled)
-                )
+                if broken:
+                    # Damaged native glyphs: the numbers are trustworthy only
+                    # if every numeric hole was filled by agreeing readings.
+                    numeric_discrepancy = bool(
+                        target.get("digit_disagreement")
+                        or re.search(r"\ufffd+\s*(?:%|/|배|개|년|위)|/\s*\ufffd", best)
+                    )
+                else:
+                    numeric_discrepancy = bool(
+                        explicit_damage or numeric_evidence_disagrees(native, candidate))
                 citation, citation_warnings = source_citation_prefix(
                     full_text, previous_text
                 )
@@ -940,6 +951,11 @@ def extract_pdf(pdf_bytes, filename, dpi=350, mode="korean", max_pages=None):
             rows.extend(extra)
             page_rows += len(extra)
             stats["region_rows"] = len(extra)
+            timeouts = (stats.get("fallback") or {}).get("timeouts", 0)
+            if timeouts:
+                warnings_page.append(
+                    f"OCR 시간 초과 {timeouts}회 · 해당 줄의 판독하지 못한 글자·숫자는 □로 표시했습니다 "
+                    "(서버 CPU 제한 가능성) · 다시 검수하거나 원본 PDF를 확인하세요")
             stats["total_seconds"] = round(time.perf_counter() - started, 3)
             summaries.append({
                 "file": filename, "page": page_num,
