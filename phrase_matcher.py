@@ -47,6 +47,15 @@ def _variable_year_match(actual, expected):
     return found.groups() if found else None
 
 
+# Footnote reference marks: '(1)', '[1]', '¹' at the start or end of a phrase.
+# They point to a separately printed footnote and are not claim numbers.
+FOOTNOTE_MARK = re.compile(r"^\s*[\[(]\s*\d\s*[\])]\s*|\s*[\[(]\s*\d\s*[\])]\s*$|[¹²³]")
+
+
+def strip_marks(text):
+    return FOOTNOTE_MARK.sub("", str(text or "")).strip()
+
+
 LEDGER_INSTRUCTION = re.compile(r"\s*\((?:Please|please|PLEASE)\b[^)]*\)")
 
 
@@ -88,7 +97,7 @@ def _one(row, master):
     # Only terminal punctuation and whitespace are cosmetic. A missing
     # full-stop at the end of printed QR instructions is not a mistranslation.
     def orthographic(value):
-        return compact(value).rstrip(".。")
+        return compact(strip_marks(value)).rstrip(".。")
     norm = [(p,v) for p,v in refs if orthographic(actual) == orthographic(p["korean_original"])]
     matches = exact or norm
     alternates = []
@@ -119,7 +128,10 @@ def _one(row, master):
                     candidates=[a["phrase_id"] for a in alternates],
                     alternates=alternates,
                     differences=("원장 동일 국문 중복 등록: " + ", ".join(
-                        a["phrase_id"] for a in alternates)) if alternates else "",
+                        a["phrase_id"] for a in alternates)) if alternates else (
+                        "각주 기호 표기 차이: 원장 '" + FOOTNOTE_MARK.search(p["korean_original"]).group().strip() + "'"
+                        if not exact and FOOTNOTE_MARK.search(p["korean_original"])
+                        and not FOOTNOTE_MARK.search(actual) else ""),
                     reason=("원문 손상·숫자 대조 필요" if status=="OCR_REVIEW"
                             else "기준 문구와 일치 (최종 승인 의미 아님)"))
     # Workbook's Y is a range-specific multiplier placeholder. Identify the
@@ -227,7 +239,7 @@ def _one(row, master):
                     reason=("글자·숫자 손상으로 정답 대조 보류 · PDF 원본 확인" if row.get("numeric_review") or DAMAGE.search(actual) else "기준 데이터에서 일치 문구 미발견"))
     score,p,v=scored[0]
     others=[x[1]["phrase_id"] for x in scored if x[0]>=score-.02]
-    mismatch = (tokens(actual)!=tokens(p["korean_original"])
+    mismatch = (tokens(strip_marks(actual))!=tokens(strip_marks(p["korean_original"]))
                 or bool(DAMAGE.search(actual)))
     status=("OCR_REVIEW" if row.get("numeric_review") or DAMAGE.search(actual)
             else "NUMERIC_MISMATCH" if mismatch
@@ -236,7 +248,7 @@ def _one(row, master):
         status="TEXT_MISMATCH"
     if len(others)>1:
         status="AMBIGUOUS_MATCH"
-    actual_numbers, expected_numbers = tokens(actual), tokens(p["korean_original"])
+    actual_numbers, expected_numbers = tokens(strip_marks(actual)), tokens(strip_marks(p["korean_original"]))
     added_only = (mismatch and not DAMAGE.search(actual)
                   and set(expected_numbers) <= set(actual_numbers))
     numeric_value = re.compile(r"\d{1,4}\s*/\s*\d{1,4}|\d+(?:[.,]\d+)?\s*(?:%|년|배|개|위|cm|mm)?")
@@ -254,8 +266,11 @@ def _one(row, master):
         reason = ("원장 수치는 모두 일치 · PDF에 원장 미등록 수치(" + ", ".join(added)
                   + ") 추가 인쇄 · 원장 등록 여부 확인 필요")
     elif mismatch:
-        differences = "숫자·단위 불일치"
-        reason = "원장과 다른 수치 · 인쇄 수치 확인 필요"
+        printed = ", ".join(tokens(strip_marks(actual))) or "없음"
+        ledger = ", ".join(tokens(strip_marks(p["korean_original"]))) or "없음"
+        differences = f"숫자·단위 불일치 (PDF {printed} / 원장 {ledger})"
+        reason = (f"원장과 다른 수치 · PDF {printed} / 원장 {ledger} · "
+                  "원장 미등록 구성이면 원장 등록 필요")
     else:
         differences = "문자·의미 검토 필요"
         reason = "가장 유사한 정답 후보. 자동 승인/발견 집계 제외"

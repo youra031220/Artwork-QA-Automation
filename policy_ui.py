@@ -23,6 +23,8 @@ def phrase_policy_findings(match,results):
             relevant="인덕션" in phrase
         elif code.startswith("DOC-WORLD-"):
             relevant="Euromonitor" in phrase or ("Home and Garden" in phrase and "에디션" in phrase)
+        elif code=="DOC-RECYCLING-LID":
+            relevant=bool(re.search(r"분리\s*배출|재활용\s*가능",phrase))
         elif code=="DOC-WARRANTY-LANGUAGE":
             relevant="보증" in phrase
         elif code in ("DOC-BILINGUAL-PERCENT","DOC-BILINGUAL-MULTIPLIER"):

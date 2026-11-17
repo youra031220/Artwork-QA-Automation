@@ -174,3 +174,44 @@ class CoatingClaimJoinTests(unittest.TestCase):
         match = match_phrases(groups, load_master())[0]
         self.assertEqual(match["phrase_id"], "P33")
         self.assertEqual(match["differences"], "Y=3")
+
+
+class FootnoteAndBulletTests(unittest.TestCase):
+    def test_footnote_mark_is_not_a_number(self):
+        match = match_phrases([{"file": "f", "page": 1, "paragraph": "최대 40% 수납 공간 절약"}],
+                              load_master())[0]
+        self.assertEqual(match["phrase_id"], "P238")
+        self.assertEqual(match["status"], "NORMALIZED_MATCH")
+
+    def test_claim_and_footnote_on_one_line_are_split(self):
+        from layout import split_bullet_clauses
+        groups = split_bullet_clauses([{"file": "f", "page": 1, "paragraph":
+            "최대 40% 수납 공간 절약 • 편수냄비 4개, 뚜껑 4개 수납을 기준으로 기존 자사 제품과 비교 테스트 진행"}])
+        self.assertEqual(len(groups), 2)
+        first, second = match_phrases(groups, load_master())
+        self.assertEqual(first["phrase_id"], "P238")
+        self.assertEqual(second["status"], "NUMERIC_MISMATCH")   # 4+4 is not in the ledger
+        self.assertIn("PDF 4개, 4개", second["reason"])
+
+
+class RecyclingLidRuleTests(unittest.TestCase):
+    def _judge(self, observed, ids):
+        from recycling_rule import judge
+        return judge(observed, [{"phrase_id": i} for i in ids])
+
+    def test_lid_requires_glass_exclusion_sentence(self):
+        self.assertEqual(self._judge("SAUCEPAN WITH LID", ["P201"])["status"], "OK")
+        result = self._judge("Casserole 16 cm + CV", ["P200"])
+        self.assertEqual(result["status"], "FAIL")
+
+    def test_no_lid_requires_plain_sentence(self):
+        self.assertEqual(self._judge("FRY PAN", ["P200"])["status"], "OK")
+        self.assertEqual(self._judge("FRY PAN", ["P201"])["status"], "FAIL")
+
+    def test_lid_in_other_context_is_not_composition(self):
+        observed = "DISHWASHER SAFE EXCEPT LID (1) TESTED ON 3 SAUCEPANS, 1 SAUTÉ PAN, 4 LIDS"
+        self.assertEqual(self._judge(observed, ["P200"])["status"], "OK")
+
+    def test_two_sentences_or_none(self):
+        self.assertEqual(self._judge("FRY PAN", ["P200", "P201"])["status"], "FAIL")
+        self.assertEqual(self._judge("FRY PAN", [])["status"], "MISSING")

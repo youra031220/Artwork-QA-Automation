@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 from extractor import extract_pdf, export_zip
-from layout import group_paragraphs, ensure_group_coverage, join_wrapped_storage_sentences
+from layout import group_paragraphs, ensure_group_coverage, join_wrapped_storage_sentences, split_bullet_clauses
 from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
 from product_identity import check_product_identity
 from pdf_overlay import collect_boxes, render_overlay, render_selected_crop, COLORS
@@ -194,7 +194,7 @@ if st.session_state.get("qa_result"):
         # extract_pdf(). Do not run four more PDF raster OCR passes here.
         # Preserve uncertain glyphs for manual verification instead.
         grouped = ensure_group_coverage(grouped, rows)
-        grouped = join_wrapped_storage_sentences(grouped)
+        grouped = split_bullet_clauses(join_wrapped_storage_sentences(grouped))
         st.subheader("전체 문구 및 검수 결과")
         st.caption("제품별로 모든 한국어 문구를 확인합니다. 여러 줄로 인쇄된 한 문장은 하나로 묶어 표시합니다. 마지막 열은 문구가 인쇄된 PDF 원본 부분이며, 빨간 테두리가 추출 위치입니다.")
         groups_df = pd.DataFrame(grouped)  # Preserve full source in existing ZIP.
@@ -278,35 +278,17 @@ if st.session_state.get("qa_result"):
                     messages.append("✓ 제조국 "+country+" — Made in France 배지 필수 대상 아님")
                 else:
                     messages.append("□ 제조국 미확인 — Made in France 배지 적용 여부 확인")
-                # Lid evidence comes from the product ticket AND printed translations.
-                # + CV = avec couvercle; do not equate a generic lid with a
-                # verified glass lid unless the source says glass.
+                # 재활용 문구 ↔ 유리뚜껑 조건 (원장 P200/P201). Lid evidence is
+                # only text read from this PDF plus the product ticket.
+                from recycling_rule import judge as judge_recycling
                 lid_source = observed + " " + str(meta.get("product_type_raw", ""))
-                has_lid = bool(re.search(
-                    r"\+\s*CV\b|AVEC\s+COUVERCLE|WITH\s+(?:GLASS\s+)?LID|"
-                    r"STEWPOT\s+WITH\s+LID|뚜껑\s*포함|뚜껑포함", lid_source, re.I))
-                glass_lid = bool(re.search(
-                    r"GLASS\s+LID|COUVERCLE\s+EN\s+VERRE|유리\s*뚜껑", lid_source, re.I))
-                recycling_note = bool(re.search(
-                    r"적절한\s*분리\s*배출|적절한\s*분리배출|RECYCLABLE\s+METAL|재활용\s*가능|재활용\s*가능합니다", observed, re.I))
-                excluded_lid = bool(re.search(
-                    r"유리\s*뚜껑\s*제외|EXCEPT\s+(?:THE\s+)?(?:GLASS\s+)?LID", observed, re.I))
-                if has_lid:
-                    messages.append("✓ 뚜껑 포함 문구 발견 (+ CV / AVEC COUVERCLE / WITH LID / 뚜껑포함)")
-                else:
-                    messages.append("□ 뚜껑 포함 문구 미발견 — 제품 구성 확인 필요")
-                if recycling_note:
-                    messages.append("✓ 재활용 안내 문구 발견 — 재활용 마크 확인 필요")
-                else:
-                    messages.append("— 재활용 안내 문구 미발견 — 재활용 마크 유무 확인 필요 (마크가 있으면 안내 문구 누락)")
-                if excluded_lid:
-                    messages.append("✓ 재활용 문구에 '(유리뚜껑 제외)' 표기 발견")
-                elif glass_lid:
-                    messages.append("□ 유리뚜껑 포함 근거 발견 — 재활용 문구에 '(유리뚜껑 제외)' 표기 확인 필요")
-                elif has_lid:
-                    messages.append("□ 뚜껑 포함 확인 — 유리뚜껑인지 확인 필요 (유리뚜껑이면 재활용 제외 문구 필수)")
-                else:
-                    messages.append("— 유리뚜껑 포함 근거 미발견 — 제외 문구 적용 여부는 미확정")
+                recycling = judge_recycling(
+                    lid_source, [m for m in p1_matches if m.get("file") == filename])
+                messages.append(recycling["message"])
+                if recycling["status"] == "FAIL":
+                    p1_rules.append({"file": filename, "rule_id": "DOC-RECYCLING-LID",
+                                     "status": "FAIL", "category": "재활용 가능",
+                                     "finding": recycling["finding"]})
                 # Each item states what was FOUND in the PDF text, then the
                 # mark/QR check that a person still has to do.
                 world_ko = bool(re.search(r"세계\s*판매\s*1\s*위|에디션[^/]{0,40}기준", observed))

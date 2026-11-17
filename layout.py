@@ -483,3 +483,35 @@ def join_wrapped_storage_sentences(groups):
             removed.add(j)
             break
     return [g for i, g in enumerate(output) if i not in removed]
+
+
+BULLET_SPLIT = re.compile(r"\s+[•·∙]\s+")
+
+
+def split_bullet_clauses(groups):
+    """Split a printed line that carries two statements joined by a bullet.
+
+    e.g. '최대 40% 수납 공간 절약 • 편수냄비 4개, 뚜껑 4개 수납을 기준으로 …'
+    is a claim and its footnote printed on one line. Each part is compared
+    with the ledger on its own. Text is not changed; both parts keep the
+    group's source coordinates (they are one printed line).
+    """
+    import copy
+    output = []
+    for group in groups:
+        text = str(group.get("paragraph", ""))
+        parts = BULLET_SPLIT.split(text)
+        hangul = [len(re.findall(r"[가-힣]", part)) for part in parts]
+        if len(parts) < 2 or min(hangul) < 4:
+            output.append(group)
+            continue
+        originals = BULLET_SPLIT.split(str(group.get("original_paragraph") or text))
+        if len(originals) != len(parts):
+            originals = parts
+        for part, original in zip(parts, originals):
+            piece = copy.deepcopy(group)
+            piece["paragraph"] = part.strip()
+            piece["original_paragraph"] = original.strip()
+            piece["type"] = "구분 기호(•)로 나뉜 문구"
+            output.append(piece)
+    return output
