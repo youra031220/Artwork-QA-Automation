@@ -187,7 +187,9 @@ if st.session_state.get("qa_result"):
     if rows:
         df = pd.DataFrame(rows)
         a, b, c = st.columns(3)
-        a.metric("PDF 한국어 원본 줄", len(rows))
+        # Filled once the result table is built (same as "추출 문구 N개").
+        phrase_metric = a.empty()
+        phrase_metric.metric("추출 문구", "…")
         b.metric("업로드한 제품", len({r["file"] for r in rows}))
         # Filled once the result table is built: phrases whose 대조 결과
         # still needs a person (same count as "확인 필요 N개" under each table).
@@ -402,6 +404,7 @@ if st.session_state.get("qa_result"):
                     "기준 영문": match.get("reference_english", ""),
                     "확인할 사항": reviewer_issue,
                 })
+            phrase_metric.metric("추출 문구", sum(len(records) for records in shown_by_file.values()))
             review_metric.metric("확인 필요 문구", sum(
                 bool(record["확인할 사항"]) for records in shown_by_file.values() for record in records))
             # PDF 원본 column: crop of each phrase's printed source lines.
@@ -451,6 +454,7 @@ if st.session_state.get("qa_result"):
                 "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")
         except Exception as p1_exc:
             review_metric.metric("확인 필요 문구", "—")
+            phrase_metric.metric("추출 문구", "—")
             st.error("문구 검수 중 오류가 발생했습니다: " + str(p1_exc))
         st.subheader("PDF 문구 위치 확인")
         st.caption("한국어·영문·숫자·제품명 위치를 표시합니다. 문구를 선택하면 원본 위치가 확대됩니다.")
