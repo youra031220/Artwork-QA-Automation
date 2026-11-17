@@ -537,7 +537,9 @@ def numeric_peer_for(row, raw_lines):
             continue
         dy = max(0, box.y0-own.y1, own.y0-box.y1)
         dx = max(0, box.x0-own.x1, own.x0-box.x1)
-        font = max(float(row["font_size"]), float(item["font_size"]), 1)
+        # Distance is measured in the ROW's text size: a large headline
+        # number ('40%') must not reach unrelated small copy below it.
+        font = max(float(row["font_size"]), 1)
         if (dy <= font*1.5 and dx <= font*8 and
                 abs(item["direction"][0]-row["dir_x"]) < .15 and
                 abs(item["direction"][1]-row["dir_y"]) < .15):
