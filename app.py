@@ -185,7 +185,10 @@ if st.session_state.get("qa_result"):
         a, b, c = st.columns(3)
         a.metric("PDF 한국어 원본 줄", len(rows))
         b.metric("업로드한 제품", len({r["file"] for r in rows}))
-        c.metric("추가 확인 항목", int((df["status"] != "원본 추출 정상").sum()))
+        # Filled once the result table is built: phrases whose 대조 결과
+        # still needs a person (same count as "확인 필요 N개" under each table).
+        review_metric = c.empty()
+        review_metric.metric("확인 필요 문구", "…")
         grouped = group_paragraphs(rows, raw_summaries=summaries)
         # OCR has already been performed once on damaged native text by
         # extract_pdf(). Do not run four more PDF raster OCR passes here.
@@ -400,6 +403,8 @@ if st.session_state.get("qa_result"):
                     "기준 영문": match.get("reference_english", ""),
                     "확인할 사항": reviewer_issue,
                 })
+            review_metric.metric("확인 필요 문구", sum(
+                bool(record["확인할 사항"]) for records in shown_by_file.values() for record in records))
             # PDF 원본 column: crop of each phrase's printed source lines.
             uploaded_bytes = {f.name: f.getvalue() for f in (files or [])}
             for filename in all_files:
@@ -442,6 +447,7 @@ if st.session_state.get("qa_result"):
                 export_p1(p1_matches, p1_rules, p1_summary),
                 "artwork_p1_qa_report.zip", mime="application/zip", key="p1_download")
         except Exception as p1_exc:
+            review_metric.metric("확인 필요 문구", "—")
             st.error("문구 검수 중 오류가 발생했습니다: " + str(p1_exc))
         st.subheader("PDF 문구 위치 확인")
         st.caption("한국어·영문·숫자·제품명 위치를 표시합니다. 문구를 선택하면 원본 위치가 확대됩니다.")
