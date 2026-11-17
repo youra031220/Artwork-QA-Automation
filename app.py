@@ -232,6 +232,19 @@ if st.session_state.get("qa_result"):
             p1_rules.extend(compare_range_messages(p1_matches, product_metadata))
             # Text-only visual checklist. This does not run any image
             # recognition and never asserts that a logo is present/absent.
+            # 필수 문구 점검: 엑셀 원장 '필수 조건 여부' 기준 발견 / 발견 실패 / 오류.
+            from required_check import check_file as check_required
+            st.subheader("필수 문구 점검")
+            st.caption("엑셀 원장의 '필수 조건 여부' 기준입니다. 원장 문장이 PDF에서 읽은 한국어 문구에 있으면 발견, "
+                       "없으면 발견 실패, 하나만 있어야 하는데 2개 이상이면 오류로 표시합니다. "
+                       "조건부 필수(재활용·세계 1위)는 아래 마크 체크리스트에서 확인합니다.")
+            for filename in all_files:
+                checks = check_required([m for m in p1_matches if m.get("file") == filename], p1_master)
+                bad = sum(c["status"] in ("MISSING", "FAIL") for c in checks)
+                title = shown_file(filename) + (f" · 발견 실패·오류 {bad}건" if bad else " · 모두 발견")
+                with st.expander(title, expanded=bool(bad)):
+                    for check in checks:
+                        st.write(check["message"])
             st.subheader("마크·QR 확인 필요 체크리스트")
             st.caption("엑셀 원장·회의 기준으로 확인할 마크를 안내합니다. 이미지 자동 검출은 하지 않으며, 실제 존재 여부는 PDF를 보고 확인하세요.")
             for filename in all_files:

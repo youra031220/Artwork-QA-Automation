@@ -215,3 +215,27 @@ class RecyclingLidRuleTests(unittest.TestCase):
     def test_two_sentences_or_none(self):
         self.assertEqual(self._judge("FRY PAN", ["P200", "P201"])["status"], "FAIL")
         self.assertEqual(self._judge("FRY PAN", [])["status"], "MISSING")
+
+
+class RequiredPhraseTests(unittest.TestCase):
+    def _check(self, texts):
+        from required_check import check_file
+        master = load_master()
+        matches = match_phrases([{"file": "f", "page": 1, "paragraph": t} for t in texts], master)
+        return {c["rule_id"]: c for c in check_file(matches, master)}
+
+    def test_warranty_sentences_found_inside_one_printed_paragraph(self):
+        result = self._check([
+            "테팔은 모든 제조 과정 중의 결함에 대하여 구입일로부터 2년간 품질 보증 제도를 실시합니다. "
+            "제품 내부와 외부에 생긴 스크래치 또는 사용 중 발생한 변색과 얼룩 등은 해당되지 않습니다.",
+            "취급 주의 사항: 본 제품 사용 시, 주의하여 주십시오. 어린이나 사용이 미숙한 사람의 손에 닿지 "
+            "않는 곳에 보관하여 주십시오. 제품이 과열되지 않도록 주의하십시오."])
+        self.assertEqual(result["R191"]["status"], "OK")
+        self.assertEqual(result["R196"]["status"], "OK")
+
+    def test_missing_and_duplicate(self):
+        result = self._check(["인덕션 포함 모든 열원 사용 가능",
+                              "가스레인지, 핫플레이트, 하이라이트 사용 가능 (인덕션 사용 불가)"])
+        self.assertEqual(result["R185"]["status"], "FAIL")
+        self.assertEqual(result["R188"]["status"], "MISSING")
+        self.assertEqual(result["R196"]["status"], "MISSING")
