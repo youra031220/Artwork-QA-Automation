@@ -116,6 +116,7 @@ if st.button("문구 검수 시작", type="primary", disabled=not files):
     else:
         st.warning("PDF 처리 완료 · 추출된 한국어 문구가 없습니다.")
 
+timing_renderer = None
 if st.session_state.get("qa_result"):
     data = st.session_state["qa_result"]
     rows, summaries, errors, identity_checks = (
@@ -132,38 +133,41 @@ if st.session_state.get("qa_result"):
     for page_info in summaries:
         for warning in page_info.get("ocr_warnings") or []:
             st.warning(f"{shown_file(page_info['file'])} p.{page_info['page']} · {warning}")
-    with st.expander("처리 시간 · OCR 호출 기록", expanded=False):
-        timing_rows = []
-        for page_info in summaries:
-            stats = page_info.get("ocr_stats") or {}
-            batch = stats.get("batch") or {}
-            image_batch = stats.get("table_reread") or {}
-            fallback = stats.get("fallback") or {}
-            badge = stats.get("badge") or {}
-            line_reread = stats.get("line_reread") or {}
-            timing_rows.append({
-                "제품": shown_file(page_info["file"]), "페이지": page_info["page"],
-                "제외한 한글표시사항 표": stats.get("label_tables", 0),
-                "손상 문구 줄": stats.get("damaged_lines", 0),
-                "이미지·벡터 후보 영역": stats.get("regions", 0),
-                "이미지·벡터에서 찾은 한국어 행": stats.get("region_rows", 0),
-                "OCR 프로세스 호출": (batch.get("calls", 0) + image_batch.get("calls", 0)
-                                    + badge.get("calls", 0) + line_reread.get("calls", 0)
-                                    + fallback.get("calls", 0)),
-                "일괄 OCR(손상 문구+이미지·벡터) 초": batch.get("seconds", 0),
-                "한국어 표 영역 단독 재판독 초": image_batch.get("seconds", 0),
-                "이미지 배지 OCR 초": badge.get("seconds", 0),
-                "표 행 재판독 초": line_reread.get("seconds", 0),
-                "개별 재판독 호출": fallback.get("calls", 0),
-                "개별 재판독 초": fallback.get("seconds", 0),
-                "렌더링 초": stats.get("render_seconds", 0),
-                "PDF 추출 전체 초": stats.get("total_seconds", 0),
-            })
-        if timing_rows:
-            st.dataframe(pd.DataFrame(timing_rows), use_container_width=True, hide_index=True)
-        st.caption("OCR 해상도 350 DPI. 같은 PDF 내용을 다시 검수하면 저장된 추출 결과를 재사용합니다. "
-                   "한글표시사항(제조자·원산지·수입원·주소·품질보증기간·주의사항 등 법정 표시) 표는 "
-                   "표 구조로 자동 인식해 문구 검수와 OCR 대상에서 제외합니다.")
+    # 처리 시간 · OCR 호출 기록: reference only, rendered at the very bottom.
+    def render_timing():
+        with st.expander("처리 시간 · OCR 호출 기록", expanded=False):
+            timing_rows = []
+            for page_info in summaries:
+                stats = page_info.get("ocr_stats") or {}
+                batch = stats.get("batch") or {}
+                image_batch = stats.get("table_reread") or {}
+                fallback = stats.get("fallback") or {}
+                badge = stats.get("badge") or {}
+                line_reread = stats.get("line_reread") or {}
+                timing_rows.append({
+                    "제품": shown_file(page_info["file"]), "페이지": page_info["page"],
+                    "제외한 한글표시사항 표": stats.get("label_tables", 0),
+                    "손상 문구 줄": stats.get("damaged_lines", 0),
+                    "이미지·벡터 후보 영역": stats.get("regions", 0),
+                    "이미지·벡터에서 찾은 한국어 행": stats.get("region_rows", 0),
+                    "OCR 프로세스 호출": (batch.get("calls", 0) + image_batch.get("calls", 0)
+                                        + badge.get("calls", 0) + line_reread.get("calls", 0)
+                                        + fallback.get("calls", 0)),
+                    "일괄 OCR(손상 문구+이미지·벡터) 초": batch.get("seconds", 0),
+                    "한국어 표 영역 단독 재판독 초": image_batch.get("seconds", 0),
+                    "이미지 배지 OCR 초": badge.get("seconds", 0),
+                    "표 행 재판독 초": line_reread.get("seconds", 0),
+                    "개별 재판독 호출": fallback.get("calls", 0),
+                    "개별 재판독 초": fallback.get("seconds", 0),
+                    "렌더링 초": stats.get("render_seconds", 0),
+                    "PDF 추출 전체 초": stats.get("total_seconds", 0),
+                })
+            if timing_rows:
+                st.dataframe(pd.DataFrame(timing_rows), use_container_width=True, hide_index=True)
+            st.caption("OCR 해상도 350 DPI. 같은 PDF 내용을 다시 검수하면 저장된 추출 결과를 재사용합니다. "
+                       "한글표시사항(제조자·원산지·수입원·주소·품질보증기간·주의사항 등 법정 표시) 표는 "
+                       "표 구조로 자동 인식해 문구 검수와 OCR 대상에서 제외합니다.")
+    timing_renderer = render_timing
     if product_metadata:
         st.subheader("제품 기본정보")
         basic_info = [{
@@ -577,3 +581,6 @@ if master is not None:
             file_name="artwork_rules_p0.json", mime="application/json"
         )
         st.caption("기준 문구 240개를 코드에서 자동 로딩합니다. D229 영문 오타는 수정했으며, 나머지 원문은 유지했습니다. 승인 상태는 별도 확인 대상입니다.")
+
+if timing_renderer is not None:
+    timing_renderer()
