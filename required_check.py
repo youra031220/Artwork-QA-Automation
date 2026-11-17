@@ -46,6 +46,10 @@ def _pattern(text):
     return re.compile(key)
 
 
+def _shown(text):
+    return str(text or "").replace("\ufffd", "□").strip()
+
+
 def check_file(matches, master):
     """matches: phrase-matcher results for ONE file (in reading order)."""
     phrases = {p["phrase_id"]: p for p in master.get("phrases", [])}
@@ -67,21 +71,38 @@ def check_file(matches, master):
             korean = phrases.get(pid, {}).get("korean_original", "")
             if korean:
                 by_korean.setdefault(_key(korean), []).append(pid)
-        found, review = [], []
+        found, review, printed = [], [], []
         for key, pids in by_korean.items():
             korean = phrases[pids[0]]["korean_original"]
             matched = [m for m in matches if m.get("phrase_id") in pids]
-            if any(m.get("status") in ACCEPTED for m in matched) or _pattern(korean).search(corpus):
+            pattern = _pattern(korean)
+            # A short ledger word ('뚜껑', '편수냄비') is not evidence when it
+            # merely occurs inside another sentence; only a sentence is.
+            sentence = len(key) >= 10 or key.endswith(":")
+            inside = (lambda text: pattern.search(_key(text))) if sentence else (
+                lambda text: pattern.fullmatch(_key(text)))
+            if any(m.get("status") in ACCEPTED for m in matched) or (
+                    pattern.search(corpus) if sentence else any(inside(m.get("extracted", "")) for m in matches)):
                 found.append(korean.strip())
+                # Show the phrase as it was extracted from the PDF (the row in
+                # the result table), not the ledger sentence it contains.
+                hosts = [m for m in matches
+                         if (m.get("phrase_id") in pids and m.get("status") in ACCEPTED)
+                         or inside(m.get("extracted", ""))]
+                for host in hosts or [{"extracted": korean}]:
+                    text = _shown(host.get("extracted", ""))
+                    if text not in printed:
+                        printed.append(text)
             elif matched:
-                review.append(korean.strip())
+                review.append(_shown(matched[0].get("extracted", "")))
         category = rules[rule_id].get("category", "")
         sleeve = " · 원장 프로세스 기준 슬리브 제품만 해당" if category in SLEEVE_ONLY else ""
         if kind == "ALL_REQUIRED":
             missing = [phrases[p[0]]["korean_original"].strip() for k, p in by_korean.items()
                        if phrases[p[0]]["korean_original"].strip() not in found]
             if not missing:
-                status, message = "OK", f"✓ {label} — {len(found)}개 모두 발견"
+                status, message = "OK", (f"✓ {label} — {len(found)}개 모두 발견: "
+                                         + " / ".join(f"'{f}'" for f in printed))
             elif len(missing) == len(by_korean):
                 status, message = "MISSING", f"✗ {label} — 발견 실패 (0/{len(by_korean)}){sleeve}"
             else:
@@ -97,15 +118,15 @@ def check_file(matches, master):
             elif kind == "EXACTLY_ONE" and count > 1:
                 status = "FAIL"
                 message = f"✗ {label} — {count}개 발견 · 하나만 있어야 함 (오류): " + " / ".join(
-                    f"'{f}'" for f in found)
+                    f"'{f}'" for f in printed)
             else:
                 status = "OK"
-                shown = found[0] if count == 1 else f"{count}개"
-                message = f"✓ {label} — 발견: '{shown}'" if count == 1 else f"✓ {label} — {shown} 발견"
+                message = f"✓ {label} — 발견: " + " / ".join(f"'{f}'" for f in printed)
         if status == "MISSING" and unregistered and rule_id == "R6":
             message += (" · 원장에 없는 국문 문구가 있음 (표의 '미분류' 행: "
                         + " / ".join(f"'{u}'" for u in unregistered[:2])
                         + ") — 키 메세지 원장 등록 누락일 수 있음")
         output.append({"rule_id": rule_id, "label": label, "category": category,
-                       "status": status, "found": found, "message": message})
+                       "status": status, "found": found, "printed": printed,
+                       "message": message})
     return output

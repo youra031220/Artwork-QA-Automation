@@ -239,3 +239,32 @@ class RequiredPhraseTests(unittest.TestCase):
         self.assertEqual(result["R185"]["status"], "FAIL")
         self.assertEqual(result["R188"]["status"], "MISSING")
         self.assertEqual(result["R196"]["status"], "MISSING")
+
+
+class EnglishPairingTests(unittest.TestCase):
+    def test_multiplier_placeholder_and_editorial_note(self):
+        from english_pairing import _target_pattern, _reference_english, _observed_reference_hint, _tidy
+        self.assertTrue(_target_pattern("EXTRA-LIFE NON-STICK UP TO YX MORE RESISTANT").search(
+            "extralifenonstickupto3xmoreresistant"))
+        self.assertEqual(_reference_english("Fry pan (in a 2-word request from KOREA)"), "Fry pan")
+        self.assertTrue(_observed_reference_hint("편수냄비 4개, 뚜껑 4개 수납을 기준으로").startswith(
+                         "TESTED ON 4 SAUCEPANS AND 4 LIDS BETWEEN"))
+        self.assertEqual(_tidy("FR YP AN"), "FRYPAN")
+
+
+class RequiredShowsExtractedPhraseTests(unittest.TestCase):
+    def test_contained_ledger_phrase_reports_the_printed_phrase(self):
+        from required_check import check_file
+        master = load_master()
+        printed = "테팔 기본 코팅 대비 최대 5배 더 오래가는 엑스트라 라이프 논스틱 코팅"
+        result = {c["rule_id"]: c for c in check_file(
+            match_phrases([{"file": "f", "page": 1, "paragraph": printed}], master), master)}
+        self.assertIn(printed, result["R31"]["message"])
+
+    def test_short_ledger_word_inside_other_sentence_is_not_found(self):
+        from required_check import check_file
+        master = load_master()
+        result = {c["rule_id"]: c for c in check_file(match_phrases(
+            [{"file": "f", "page": 1, "paragraph": "편수냄비 4개, 뚜껑 4개 수납을 기준으로 기존 자사 제품과 비교 테스트 진행"}],
+            master), master)}
+        self.assertEqual(result["R54"]["status"], "MISSING")

@@ -18,6 +18,8 @@ def _reference_english(text):
     if not text:
         return ""
     text = re.split(r"\s+(?:or|또는)\s+", text, maxsplit=1, flags=re.I)[0]
+    # Editorial notes in the ledger cell are not printed copy.
+    text = re.sub(r"\s*\((?:in a|please|e\.g)[^)]*\)", "", text, flags=re.I).strip()
     if _SCRIPT.search(text):
         return ""
     return text
@@ -38,11 +40,16 @@ def _compact_with_offsets(text):
     return "".join(normalized), offsets
 
 
+def _variables(escaped):
+    """Ledger placeholders: 202X = a year, 'UP TO YX' = a printed multiplier."""
+    return escaped.replace("202x", r"202\d").replace("uptoyx", r"upto\d{1,2}x")
+
+
 def _target_pattern(reference):
     compact, _ = _compact_with_offsets(reference)
     if len(compact) < 5:
         return None
-    return re.compile(re.escape(compact).replace("202x", r"202\d"), re.I)
+    return re.compile(_variables(re.escape(compact)), re.I)
 
 
 def _source_match(raw, pattern, reference=""):
@@ -96,14 +103,14 @@ def _is_prefix(candidate, target):
     expected,_ = _compact_with_offsets(target)
     if not have or not expected:
         return False
-    full = re.compile(re.escape(expected).replace("202x", r"202\d"))
+    full = re.compile(_variables(re.escape(expected)))
     if full.match(have):
         return True  # PDF line may continue with unrelated translated content
     if len(have) > len(expected):
         return False
     projected = expected[:len(have)]
     return bool(re.fullmatch(
-        re.escape(projected).replace("202x", r"202\d"), have
+        _variables(re.escape(projected)), have
     ))
 
 
@@ -121,6 +128,17 @@ def _observed_reference_hint(korean):
         return f"UP TO {coating.group(1)}X MORE RESISTANT THAN TEFAL BASIC COATING"
     if re.search(r"편수냄비\s*\(?\s*뚜껑\s*포함\s*\)?", korean):
         return "SAUCEPAN WITH LID"
+    if re.search(r"양수냄비\s*\(?\s*뚜껑\s*포함\s*\)?", korean):
+        return "STEWPOT WITH LID"
+    # Storage footnote: the printed counts decide the English wording.
+    pots = re.search(r"(편수|양수)냄비\s*(\d+)\s*개\s*(?:,|및)?\s*뚜껑\s*(\d+)\s*개", korean)
+    if pots:
+        kind = "SAUCEPANS" if pots.group(1) == "편수" else "STEWPOTS"
+        return (f"TESTED ON {pots.group(2)} {kind} AND {pots.group(3)} LIDS"
+                " BETWEEN A PREVIOUS TEFAL RANGE AND A NEW GENERATION RANGE")
+    years = re.search(r"(\d{1,2})\s*년\s*품질\s*보증", korean)
+    if years:
+        return f"{years.group(1)} YEARS GUARANTEE"
     return ""
 
 
@@ -130,9 +148,38 @@ def find_english_counterpart(match, summaries):
     Handles up to six geometrically connected PDF text objects. Search is
     prefix-pruned and bounded; unrelated neighboring sentences are excluded.
     """
-    reference=_reference_english(match.get("reference_english"))
-    if not reference:
-        reference=_observed_reference_hint(match.get("extracted"))
+    tried=[]
+    hint=_observed_reference_hint(match.get("extracted"))
+    # A long hint may run past what is printed; fall back to its first clause.
+    short_hint=re.split(r"\s+BETWEEN\s+", hint)[0] if hint else ""
+    for reference in (_reference_english(match.get("reference_english")), hint, short_hint):
+        if reference and reference not in tried:
+            tried.append(reference)
+            found=_find_reference(match, summaries, reference)
+            if found:
+                return _tidy(found)
+    # 'UP TO YX': the multiplier is often a large graphic numeral with no
+    # text layer, which breaks the chain. Find the printed words on each side
+    # and mark the unreadable number with □ (never fill it in).
+    for reference in tried:
+        split=re.split(r"(?i)\s*\bUP\s+TO\s+Y\s*X\b\s*", reference)
+        if len(split)==2 and all(split):
+            head=_find_reference(match, summaries, split[0].strip()+" UP TO")
+            tail=_find_reference(match, summaries, split[1].strip())
+            if head and tail:
+                return _tidy(f"{head} □ {tail}")
+    return ""
+
+
+def _tidy(text):
+    """Curved lettering comes out as 1–2 letter pieces ('FR YP AN')."""
+    parts=text.split()
+    if len(parts)>1 and all(len(p)<=2 and p.isalpha() for p in parts):
+        return "".join(parts)
+    return text
+
+
+def _find_reference(match, summaries, reference):
     pattern=_target_pattern(reference)
     if not pattern:
         return ""
