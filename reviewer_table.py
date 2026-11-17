@@ -54,7 +54,7 @@ def reviewer_html_table(records):
 .artwork-qa-table .artwork-qa-pair {border-top:2px solid rgba(128,128,128,.35);}
 .artwork-qa-table .artwork-qa-unknown {opacity:.70;}
 .artwork-qa-table .artwork-qa-note {font-size:11.5px;opacity:.75;margin-top:4px;}
-.artwork-qa-table .artwork-qa-crop {width:100%;height:auto;display:block;
+.artwork-qa-table .artwork-qa-crop {width:100%;height:auto;max-height:420px;object-fit:contain;object-position:left top;display:block;
   border:1px solid rgba(128,128,128,.25);border-radius:3px;background:#fff;}
 </style>"""
     cols="<colgroup>"+ "".join(

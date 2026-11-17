@@ -421,8 +421,12 @@ if st.session_state.get("qa_result"):
                                   if (c.get("page") or page_no) == page_no)
                     first = next((i for i in match.get("line_indices") or []
                                   if isinstance(i, int) and 0 <= i < len(rows)), None)
-                    upside_down = bool(first is not None and float(rows[first].get("dir_x", 1)) < -.8)
-                    requests.append((int(page_no), boxes, upside_down))
+                    turn = 0
+                    if first is not None:
+                        dx = float(rows[first].get("dir_x", 1) or 0)
+                        dy = float(rows[first].get("dir_y", 0) or 0)
+                        turn = 180 if dx < -.8 else 90 if dy > .8 else 270 if dy < -.8 else 0
+                    requests.append((int(page_no), boxes, turn))
                 images = cached_phrase_crops(pdf_bytes, tuple(requests))
                 for record, image in zip(shown_by_file[filename], images):
                     record["PDF 원본 이미지"] = image
