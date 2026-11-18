@@ -73,6 +73,29 @@ def cached_phrase_crops(pdf_bytes, requests):
     return crop_data_uris(pdf_bytes, requests)
 
 
+def required_overview(required_by_file, shown_file):
+    """필수 문구 점검 요약표: 점검 항목 = 행, 제품 = 열, 칸 = O / X / 오류 / △."""
+    symbols = {"OK": "O", "MISSING": "X", "FAIL": "오류", "REVIEW": "△"}
+    columns, rows = [], {}
+    for filename, checks in required_by_file.items():
+        name = shown_file(filename)
+        while name in columns:          # two uploads with the same product label
+            name += " "
+        columns.append(name)
+        for check in checks:
+            mark = symbols.get(check["status"], "△")
+            if mark == "X" and check.get("category") in ("사용방법 QR", "품질 보증 / 사용법"):
+                mark = "X*"
+            rows.setdefault(check["label"], {})[name] = mark
+    table = pd.DataFrame.from_dict(rows, orient="index")[columns]
+    table.index.name = "점검 항목"
+    colors = {"O": "color:#1a7f37;font-weight:600", "X": "color:#cf222e;font-weight:600",
+              "X*": "color:#9a6700", "오류": "color:#cf222e;font-weight:700;background:#ffebe9",
+              "△": "color:#9a6700;font-weight:600"}
+    styled = table.style.map(lambda value: colors.get(value, ""))
+    return styled.set_properties(**{"text-align": "center"})
+
+
 @st.cache_data(show_spinner=False, max_entries=6)
 def cached_zoom_view(pdf_bytes, page, boxes_json, selected, show_all, caption):
     """High-resolution full page with boxes, as a click-to-zoom viewer."""
@@ -258,13 +281,24 @@ if st.session_state.get("qa_result"):
             st.caption("엑셀 원장의 '필수 조건 여부' 기준입니다. 원장 문장이 PDF에서 읽은 한국어 문구에 있으면 발견, "
                        "없으면 발견 실패, 하나만 있어야 하는데 2개 이상이면 오류로 표시합니다. "
                        "조건부 필수(재활용·세계 1위)는 아래 마크 체크리스트에서 확인합니다.")
-            for filename in all_files:
-                checks = check_required([m for m in p1_matches if m.get("file") == filename], p1_master)
-                bad = sum(c["status"] in ("MISSING", "FAIL") for c in checks)
-                title = shown_file(filename) + (f" · 발견 실패·오류 {bad}건" if bad else " · 모두 발견")
-                with st.expander(title, expanded=bool(bad)):
-                    for check in checks:
-                        st.write(check["message"])
+            required_by_file = {
+                filename: check_required([m for m in p1_matches if m.get("file") == filename], p1_master)
+                for filename in all_files}
+            if st.checkbox("한눈에 보기", key="required_overview",
+                           help="점검 항목을 행, 제품을 열로 놓고 O/X로 요약합니다."):
+                st.dataframe(required_overview(required_by_file, shown_file),
+                             use_container_width=True)
+                st.caption("O 발견 · X 발견 실패 · 오류 하나만 있어야 하는데 2개 이상 · △ 유사 문구만 있어 확인 필요. "
+                           "X* = 슬리브 제품만 필수인 항목(사용방법 QR·품질보증)이라 박스 포장이면 정상입니다. "
+                           "어떤 문구가 발견됐는지는 체크를 끄면 제품별로 볼 수 있습니다.")
+            else:
+                for filename in all_files:
+                    checks = required_by_file[filename]
+                    bad = sum(c["status"] in ("MISSING", "FAIL") for c in checks)
+                    title = shown_file(filename) + (f" · 발견 실패·오류 {bad}건" if bad else " · 모두 발견")
+                    with st.expander(title, expanded=bool(bad)):
+                        for check in checks:
+                            st.write(check["message"])
             st.subheader("마크·QR 확인 필요 체크리스트")
             st.caption("엑셀 원장·회의 기준으로 확인할 마크를 안내합니다. 이미지 자동 검출은 하지 않으며, 실제 존재 여부는 PDF를 보고 확인하세요.")
             for filename in all_files:
