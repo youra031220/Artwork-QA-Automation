@@ -102,7 +102,7 @@ def cached_zoom_view(pdf_bytes, page, boxes_json, selected, show_all, caption):
     import importlib, inspect
     import pdf_overlay
     import zoom_view
-    if getattr(zoom_view, "VERSION", 1) < 3:
+    if getattr(zoom_view, "VERSION", 1) < 4:
         importlib.reload(zoom_view)
     ZOOM_SIDE, zoom_html, viewer_height = zoom_view.ZOOM_SIDE, zoom_view.zoom_html, zoom_view.viewer_height
     # Streamlit Cloud keeps imported modules across a git update; pick up a
