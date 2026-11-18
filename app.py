@@ -77,7 +77,13 @@ def cached_phrase_crops(pdf_bytes, requests):
 def cached_zoom_view(pdf_bytes, page, boxes_json, selected, show_all, caption):
     """High-resolution full page with boxes, as a click-to-zoom viewer."""
     from zoom_view import ZOOM_SIDE, zoom_html, viewer_height
-    image = render_overlay(pdf_bytes, page, json.loads(boxes_json),
+    import importlib, inspect
+    import pdf_overlay
+    # Streamlit Cloud keeps imported modules across a git update; pick up a
+    # newer pdf_overlay without needing a manual reboot.
+    if "max_side" not in inspect.signature(pdf_overlay.render_overlay).parameters:
+        importlib.reload(pdf_overlay)
+    image = pdf_overlay.render_overlay(pdf_bytes, page, json.loads(boxes_json),
                            selected=selected, show_all=show_all, max_side=ZOOM_SIDE)
     return zoom_html(image, caption), viewer_height(image.width, image.height)
 
