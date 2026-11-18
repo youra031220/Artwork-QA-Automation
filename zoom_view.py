@@ -2,13 +2,14 @@
 
 The page is rendered once at high resolution (long side ZOOM_SIDE px) and sent
 as a JPEG. Every click zooms in around the clicked point; the wheel zooms,
-dragging pans, double-click (or '원래 크기') resets. No Streamlit rerun happens
+Ctrl/⌘+wheel zooms, dragging pans, double-click (or '원래 크기') resets. No Streamlit rerun happens
 while zooming, so it is instant.
 """
 import base64
 import html
 import io
 
+VERSION = 2               # bump when the viewer changes (Cloud reloads it)
 ZOOM_SIDE = 4400          # long side of the zoomable render (px)
 VIEW_WIDTH_GUESS = 680    # approximate width of the right-hand column (px)
 MAX_VIEW_HEIGHT = 780
@@ -32,7 +33,7 @@ def zoom_html(image, caption=""):
     <button id="zout" title="축소">－</button>
     <button id="zreset">원래 크기</button>
     <span id="zlabel" style="color:#666;margin-left:4px;">100%</span>
-    <span style="color:#888;margin-left:auto;">클릭: 확대 · 드래그: 이동 · 휠: 확대/축소 · 더블클릭: 원래 크기</span>
+    <span style="color:#888;margin-left:auto;">클릭: 확대 · 드래그: 이동 · Ctrl+휠: 확대/축소 · 더블클릭: 원래 크기</span>
   </div>
   <div id="zbox" style="position:relative;overflow:hidden;height:{height}px;border:1px solid #ddd;
        border-radius:4px;background:#f6f6f6;cursor:zoom-in;touch-action:none;user-select:none;">
@@ -70,7 +71,8 @@ def zoom_html(image, caption=""):
   box.addEventListener('pointerup', e=>{{ const wasDrag=moved; drag=null;
     if(!wasDrag && e.detail<2){{ const [x,y]=point(e); zoomAt(1.8,x,y); }} else draw(); }});
   box.addEventListener('dblclick', e=>{{ e.preventDefault(); reset(); }});
-  box.addEventListener('wheel', e=>{{ e.preventDefault(); const [x,y]=point(e);
+  // Plain wheel scrolls the page; Ctrl/⌘ + wheel (or a pinch) zooms.
+  box.addEventListener('wheel', e=>{{ if(!(e.ctrlKey||e.metaKey)) return; e.preventDefault(); const [x,y]=point(e);
     zoomAt(e.deltaY<0 ? 1.25 : 0.8, x, y); }}, {{passive:false}});
   document.getElementById('zin').onclick=()=>zoomAt(1.8, box.clientWidth/2, box.clientHeight/2);
   document.getElementById('zout').onclick=()=>zoomAt(1/1.8, box.clientWidth/2, box.clientHeight/2);
