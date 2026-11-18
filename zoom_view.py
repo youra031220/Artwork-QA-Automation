@@ -2,14 +2,14 @@
 
 The page is rendered once at high resolution (long side ZOOM_SIDE px) and sent
 as a JPEG. Every click zooms in around the clicked point; the wheel zooms,
-Ctrl/⌘+wheel zooms, dragging pans, double-click (or '원래 크기') resets. No Streamlit rerun happens
+the wheel zooms smoothly, dragging pans, double-click (or '원래 크기') resets. No Streamlit rerun happens
 while zooming, so it is instant.
 """
 import base64
 import html
 import io
 
-VERSION = 2               # bump when the viewer changes (Cloud reloads it)
+VERSION = 3               # bump when the viewer changes (Cloud reloads it)
 ZOOM_SIDE = 4400          # long side of the zoomable render (px)
 VIEW_WIDTH_GUESS = 680    # approximate width of the right-hand column (px)
 MAX_VIEW_HEIGHT = 780
@@ -33,7 +33,7 @@ def zoom_html(image, caption=""):
     <button id="zout" title="축소">－</button>
     <button id="zreset">원래 크기</button>
     <span id="zlabel" style="color:#666;margin-left:4px;">100%</span>
-    <span style="color:#888;margin-left:auto;">클릭: 확대 · 드래그: 이동 · Ctrl+휠: 확대/축소 · 더블클릭: 원래 크기</span>
+    <span style="color:#888;margin-left:auto;">클릭·휠: 확대/축소 · 드래그: 이동 · 더블클릭: 원래 크기</span>
   </div>
   <div id="zbox" style="position:relative;overflow:hidden;height:{height}px;border:1px solid #ddd;
        border-radius:4px;background:#f6f6f6;cursor:zoom-in;touch-action:none;user-select:none;">
@@ -58,6 +58,7 @@ def zoom_html(image, caption=""):
     label.textContent=Math.round(s/fit*100)+'%'; box.style.cursor = s>=MAX-1e-6 ? 'grab' : 'zoom-in'; }}
   function reset(){{ fit=Math.min(box.clientWidth/img.naturalWidth, box.clientHeight/img.naturalHeight);
     s=fit; tx=0; ty=0; draw(); }}
+  function animate(on){{ img.style.transition = on ? 'transform 0.18s ease-out' : 'none'; }}
   function zoomAt(factor, cx, cy){{
     const ns=Math.max(fit, Math.min(MAX, s*factor));
     tx = cx-(cx-tx)*ns/s; ty = cy-(cy-ty)*ns/s; s=ns; draw();
@@ -67,16 +68,18 @@ def zoom_html(image, caption=""):
   box.addEventListener('pointermove', e=>{{ if(!drag) return;
     const dx=e.clientX-drag[0], dy=e.clientY-drag[1];
     if(Math.abs(dx)+Math.abs(dy)>4) moved=true;
-    if(moved){{ tx=drag[2]+dx; ty=drag[3]+dy; box.style.cursor='grabbing'; draw(); }} }});
+    if(moved){{ animate(false); tx=drag[2]+dx; ty=drag[3]+dy; box.style.cursor='grabbing'; draw(); }} }});
   box.addEventListener('pointerup', e=>{{ const wasDrag=moved; drag=null;
-    if(!wasDrag && e.detail<2){{ const [x,y]=point(e); zoomAt(1.8,x,y); }} else draw(); }});
-  box.addEventListener('dblclick', e=>{{ e.preventDefault(); reset(); }});
-  // Plain wheel scrolls the page; Ctrl/⌘ + wheel (or a pinch) zooms.
-  box.addEventListener('wheel', e=>{{ if(!(e.ctrlKey||e.metaKey)) return; e.preventDefault(); const [x,y]=point(e);
-    zoomAt(e.deltaY<0 ? 1.25 : 0.8, x, y); }}, {{passive:false}});
-  document.getElementById('zin').onclick=()=>zoomAt(1.8, box.clientWidth/2, box.clientHeight/2);
-  document.getElementById('zout').onclick=()=>zoomAt(1/1.8, box.clientWidth/2, box.clientHeight/2);
-  document.getElementById('zreset').onclick=reset;
+    if(!wasDrag && e.detail<2){{ const [x,y]=point(e); animate(true); zoomAt(1.8,x,y); }} else draw(); }});
+  box.addEventListener('dblclick', e=>{{ e.preventDefault(); animate(true); reset(); }});
+  // Wheel / trackpad zoom, proportional to the scroll amount so it is smooth.
+  box.addEventListener('wheel', e=>{{ e.preventDefault(); const [x,y]=point(e);
+    const unit = e.deltaMode===1 ? 33 : (e.deltaMode===2 ? 400 : 1);
+    const dy = Math.max(-120, Math.min(120, e.deltaY*unit));
+    animate(false); zoomAt(Math.exp(-dy*0.0025), x, y); }}, {{passive:false}});
+  document.getElementById('zin').onclick=()=>{{ animate(true); zoomAt(1.8, box.clientWidth/2, box.clientHeight/2); }};
+  document.getElementById('zout').onclick=()=>{{ animate(true); zoomAt(1/1.8, box.clientWidth/2, box.clientHeight/2); }};
+  document.getElementById('zreset').onclick=()=>{{ animate(true); reset(); }};
   if(img.complete) reset(); else img.onload=reset;
   window.addEventListener('resize', reset);
 }})();
