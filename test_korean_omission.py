@@ -268,3 +268,13 @@ class RequiredShowsExtractedPhraseTests(unittest.TestCase):
             [{"file": "f", "page": 1, "paragraph": "편수냄비 4개, 뚜껑 4개 수납을 기준으로 기존 자사 제품과 비교 테스트 진행"}],
             master), master)}
         self.assertEqual(result["R54"]["status"], "MISSING")
+
+
+class KeyMessageUnregisteredTests(unittest.TestCase):
+    def test_unregistered_phrase_makes_key_message_a_review_not_a_miss(self):
+        from required_check import check_file
+        master = load_master()
+        result = {c["rule_id"]: c for c in check_file(match_phrases(
+            [{"file": "f", "page": 1, "paragraph": "쉬운 요리를 위한 강력한 코팅, 가벼운 무게"}], master), master)}
+        self.assertEqual(result["R6"]["status"], "REVIEW")
+        self.assertTrue(result["R6"]["message"].startswith("△"))

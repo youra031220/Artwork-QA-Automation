@@ -277,7 +277,11 @@ if st.session_state.get("qa_result"):
             # Text-only visual checklist. This does not run any image
             # recognition and never asserts that a logo is present/absent.
             # 필수 문구 점검: 엑셀 원장 '필수 조건 여부' 기준 발견 / 발견 실패 / 오류.
-            from required_check import check_file as check_required
+            import importlib
+            import required_check
+            if getattr(required_check, "VERSION", 1) < 2:
+                importlib.reload(required_check)
+            check_required = required_check.check_file
             st.subheader("필수 문구 점검")
             st.caption("엑셀 원장의 '필수 조건 여부' 기준입니다. 원장 문장이 PDF에서 읽은 한국어 문구에 있으면 발견, "
                        "없으면 발견 실패, 하나만 있어야 하는데 2개 이상이면 오류로 표시합니다. "
@@ -289,15 +293,19 @@ if st.session_state.get("qa_result"):
                            help="점검 항목을 행, 제품을 열로 놓고 O/X로 요약합니다."):
                 st.dataframe(required_overview(required_by_file, shown_file),
                              use_container_width=True)
-                st.caption("O 발견 · X 발견 실패 · 오류 하나만 있어야 하는데 2개 이상 · △ 유사 문구만 있어 확인 필요. "
+                st.caption("O 발견 · X 발견 실패 · 오류 하나만 있어야 하는데 2개 이상 · △ 원장 문구는 없지만 비슷하거나 원장에 없는 문구가 있어 확인 필요(예: 원장 미등록 키 메세지). "
                            "X* = 슬리브 제품만 필수인 항목(사용방법 QR·품질보증)이라 박스 포장이면 정상입니다. "
                            "어떤 문구가 발견됐는지는 체크를 끄면 제품별로 볼 수 있습니다.")
             else:
                 for filename in all_files:
                     checks = required_by_file[filename]
                     bad = sum(c["status"] in ("MISSING", "FAIL") for c in checks)
-                    title = shown_file(filename) + (f" · 발견 실패·오류 {bad}건" if bad else " · 모두 발견")
-                    with st.expander(title, expanded=bool(bad)):
+                    review = sum(c["status"] == "REVIEW" for c in checks)
+                    title = shown_file(filename) + (
+                        f" · 발견 실패·오류 {bad}건" if bad else "") + (
+                        f" · 확인 필요 {review}건" if review else "") + (
+                        "" if bad or review else " · 모두 발견")
+                    with st.expander(title, expanded=bool(bad or review)):
                         for check in checks:
                             st.write(check["message"])
             st.subheader("마크·QR 확인 필요 체크리스트")

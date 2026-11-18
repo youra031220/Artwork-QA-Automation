@@ -18,6 +18,8 @@ import re
 
 from phrase_matcher import compact, strip_marks
 
+VERSION = 2   # bump on change: the app reloads a stale copy on Streamlit Cloud
+
 ACCEPTED = {"EXACT_MATCH", "NORMALIZED_MATCH", "VARIABLE_MATCH"}
 
 # Sheet1(아트웍 AI 자동화 프로세스): 품질 보증 / 사용법 · 사용방법 QR 은 '슬리브만 해당'.
@@ -123,9 +125,12 @@ def check_file(matches, master):
                 status = "OK"
                 message = f"✓ {label} — 발견: " + " / ".join(f"'{f}'" for f in printed)
         if status == "MISSING" and unregistered and rule_id == "R6":
-            message += (" · 원장에 없는 국문 문구가 있음 (표의 '미분류' 행: "
-                        + " / ".join(f"'{u}'" for u in unregistered[:2])
-                        + ") — 키 메세지 원장 등록 누락일 수 있음")
+            # Something is printed, it is just not in the ledger: a person
+            # decides whether it is the key message (not a plain miss).
+            status = "REVIEW"
+            message = (f"△ {label} — 원장 문구는 없지만 원장에 없는 국문 문구가 있음 (표의 '미분류' 행: "
+                       + " / ".join(f"'{u}'" for u in unregistered[:2])
+                       + ") — 키 메세지인지 확인, 맞으면 원장 등록 필요")
         output.append({"rule_id": rule_id, "label": label, "category": category,
                        "status": status, "found": found, "printed": printed,
                        "message": message})
