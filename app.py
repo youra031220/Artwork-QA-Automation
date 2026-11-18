@@ -232,6 +232,7 @@ if st.session_state.get("qa_result"):
         # Per-product 추출 문구 / 확인 필요 문구 counts, filled once the result
         # table is built (same numbers as "추출 문구 N개 · 확인 필요 N개").
         count_slot = st.empty()
+        mark_messages_by_file = {}   # 마크 체크리스트, also shown beside the PDF view
         grouped = group_paragraphs(rows, raw_summaries=summaries)
         # OCR has already been performed once on damaged native text by
         # extract_pdf(). Do not run four more PDF raster OCR passes here.
@@ -385,6 +386,7 @@ if st.session_state.get("qa_result"):
                 else:
                     messages.append("— Tefal Commitments 문구 미발견 — 적용 대상 제품인지 확인 필요 "
                                     "(적용 대상이면 QR·로고 누락)")
+                mark_messages_by_file[filename] = messages
                 with st.expander(shown_file(filename)+" · 마크 확인 항목",expanded=True):
                     for message in messages:
                         st.write(message)
@@ -562,6 +564,14 @@ if st.session_state.get("qa_result"):
                 else:
                     item_index = None
                     st.info("선택한 조건에 해당하는 추출 문구가 없습니다.")
+                # Same mark checklist as above, next to the PDF so the marks
+                # can be checked against the page while looking at it.
+                if mark_messages_by_file.get(view_file):
+                    st.markdown("**마크·QR 확인 필요 체크리스트**")
+                    with st.container(border=True):
+                        for message in mark_messages_by_file[view_file]:
+                            st.write(message)
+                    st.caption("오른쪽 전체 PDF를 클릭·휠로 확대해 마크를 확인하세요.")
             with right:
                 uploaded_pdf = next(
                     (item for item in files if item.name == view_file), None
