@@ -50,6 +50,19 @@ st.set_page_config(page_title="아트웍 문구 검수", layout="wide")
 st.title("아트웍 문구 검수")
 st.caption("PDF를 업로드하면 제품정보와 문구를 확인하고 기준 문구와 다른 부분을 찾아줍니다.")
 files = st.file_uploader("아트웍 PDF 업로드", type=["pdf"], accept_multiple_files=True)
+# Results are keyed by file name, so the same PDF uploaded twice would be
+# counted twice (e.g. two recycling sentences). Keep one copy per file name.
+if files:
+    _unique, _dropped = {}, []
+    for _file in files:
+        if _file.name in _unique:
+            _dropped.append(_file.name)
+        else:
+            _unique[_file.name] = _file
+    if _dropped:
+        st.warning("같은 이름의 PDF가 중복으로 올라와 한 번만 검수합니다: "
+                   + ", ".join(sorted(set(_dropped))))
+    files = list(_unique.values())
 master = None
 try:
     @st.cache_data(show_spinner=False)
