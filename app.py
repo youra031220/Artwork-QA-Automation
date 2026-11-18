@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from extractor import extract_pdf, export_zip
 from layout import group_paragraphs, ensure_group_coverage, join_wrapped_storage_sentences, split_bullet_clauses
 from ocr_review import combine_damaged_coating, combine_damaged_attribution, recover_damaged_warranty
@@ -70,6 +71,15 @@ def _cached_extract_content(pdf_bytes, dpi):
 def cached_phrase_crops(pdf_bytes, requests):
     from phrase_crop import crop_data_uris
     return crop_data_uris(pdf_bytes, requests)
+
+
+@st.cache_data(show_spinner=False, max_entries=6)
+def cached_zoom_view(pdf_bytes, page, boxes_json, selected, show_all, caption):
+    """High-resolution full page with boxes, as a click-to-zoom viewer."""
+    from zoom_view import ZOOM_SIDE, zoom_html, viewer_height
+    image = render_overlay(pdf_bytes, page, json.loads(boxes_json),
+                           selected=selected, show_all=show_all, max_side=ZOOM_SIDE)
+    return zoom_html(image, caption), viewer_height(image.width, image.height)
 
 
 def cached_extract_pdf(pdf_bytes, filename, dpi):
@@ -528,16 +538,13 @@ if st.session_state.get("qa_result"):
                         else:
                             st.info("선택한 문구의 좌표가 없어 확대 미리보기를 표시할 수 없습니다.")
                     st.markdown("**전체 PDF 위치 확인**")
-                    image = render_overlay(
-                        uploaded_pdf.getvalue(), view_page, boxes,
-                        selected=item_index, show_all=show_all
-                    )
-                    st.image(
-                        image,
-                        caption=f"{shown_file(view_file)} · {view_page}페이지 (원본 PDF 근거 위치)",
-                        use_container_width=True
-                    )
-                    st.caption("PDF 전체 페이지를 표시합니다. 선택된 항목은 노란색으로 강조됩니다.")
+                    zoom_page, zoom_height = cached_zoom_view(
+                        uploaded_pdf.getvalue(), view_page, json.dumps(boxes, ensure_ascii=False, default=str),
+                        item_index, show_all,
+                        f"{shown_file(view_file)} · {view_page}페이지 (원본 PDF 근거 위치)")
+                    components.html(zoom_page, height=zoom_height + 40, scrolling=False)
+                    st.caption("PDF 전체 페이지를 표시합니다. 선택된 항목은 노란색으로 강조됩니다. "
+                               "클릭할 때마다 그 지점이 확대됩니다.")
 
         original_zip = io.BytesIO(export_zip(rows, summaries))
         output_zip = io.BytesIO()

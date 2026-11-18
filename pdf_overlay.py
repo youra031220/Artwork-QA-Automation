@@ -235,7 +235,7 @@ def rect_from_row(row):
     return [float(row[k]) for k in ("x0", "y0", "x1", "y1")]
 
 
-def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True):
+def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True, max_side=None):
     """Render and draw in PDF pixels using PyMuPDF's page rotation matrix.
 
     Text rectangles come from rawdict/dict (unrotated page space). The page's
@@ -245,8 +245,11 @@ def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True):
     with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
         page = doc[page_number - 1]
         dimensions = page.rect
-        scale = min(2.0, 1600 / max(1, dimensions.width),
-                    2200 / max(1, dimensions.height))
+        base = min(2.0, 1600 / max(1, dimensions.width),
+                   2200 / max(1, dimensions.height))
+        # max_side: high-resolution render for the zoomable viewer.
+        scale = (max_side / max(1, dimensions.width, dimensions.height)) if max_side else base
+        weight = max(1.0, scale / base)
         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
         original = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
         overlay = Image.new("RGBA", original.size, (0, 0, 0, 0))
@@ -272,12 +275,12 @@ def render_overlay(pdf_bytes, page_number, items, selected=None, show_all=True):
                                  max(0, min(original.height - 1, y1))))
                 if x1 <= x0 or y1 <= y0:
                     continue
-                stroke = 5 if active else 2
+                stroke = round((5 if active else 2) * weight)
                 draw.rectangle((x0, y0, x1, y1), outline=color, width=stroke)
                 if active:
                     draw.rectangle((x0, y0, x1, y1),
                                    fill=(255, 215, 0, 42),
-                                   outline="#FFB500", width=6)
+                                   outline="#FFB500", width=round(6 * weight))
         return Image.alpha_composite(original, overlay).convert("RGB")
 
 
